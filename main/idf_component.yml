@@ -1,3 +1,0 @@
-## IDF Component Manager Manifest
-dependencies:
-  espressif/mdns: "^1.2.0"

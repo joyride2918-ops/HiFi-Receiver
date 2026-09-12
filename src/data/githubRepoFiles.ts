@@ -2011,8 +2011,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install esptool & idf-component-manager
-        run: pip install esptool idf-component-manager
+      - name: Install esptool
+        run: pip install esptool
 
       - name: Build ESP-IDF Firmware in Container
         uses: espressif/esp-idf-ci-action@v1
@@ -2021,8 +2021,9 @@ jobs:
           target: esp32s3
           path: '.'
 
-      - name: Generate Monolithic merged.bin (0x0 Flash Image)
+      - name: Fix Workspace Permissions & Generate Monolithic merged.bin
         run: |
+          sudo chown -R \$USER:\$USER .
           python scripts/merge_bin.py
 
       - name: Upload Build Artifacts (including merged.bin)
@@ -2052,13 +2053,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install PlatformIO Core & IDF Component Manager
-        run: |
-          pip install --upgrade platformio esptool idf-component-manager
-
-      - name: Install ESP-IDF Submodules or Pre-resolve Components
-        run: |
-          python -m idf_component_manager.core --project-dir . prepare-dependencies
+      - name: Install PlatformIO Core & esptool
+        run: pip install --upgrade platformio esptool
 
       - name: PlatformIO Build
         run: pio run -e esp32s3_espidf
