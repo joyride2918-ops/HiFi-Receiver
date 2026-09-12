@@ -1,0 +1,6 @@
+{
+  "name": "ESP32-S3 N16R8 Wi-Fi Music Streamer",
+  "description": "Production-grade ESP-IDF AirPlay 2, DLNA, HTTP audio streamer with UDA1334A DAC, DSP EQ, OTA and AMOLED UI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
