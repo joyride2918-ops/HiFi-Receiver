@@ -99,7 +99,6 @@ Apache-2.0 License. Copyright (c) 2026.
     language: 'ini',
     content: `; ==============================================================================
 ; PlatformIO Project Configuration for ESP32-S3-WROOM-1 N16R8 + UDA1334A DAC
-; Supports both ESP-IDF Native and Arduino-as-ESP-IDF-Component frameworks
 ; ==============================================================================
 
 [platformio]
@@ -117,7 +116,7 @@ board_build.f_flash = 80000000L
 board_build.flash_size = 16MB
 board_build.partitions = partitions.csv
 
-; 8MB Octal PSRAM (OPI) Configuration for Audio Ringbuffer
+; 8MB Octal PSRAM (OPI) Configuration
 board_build.arduino.memory_type = qio_opi
 board_build.psram_type = opi
 
@@ -129,12 +128,13 @@ build_flags =
     -DCONFIG_SPIRAM_TYPE_AUTO=1
     -DCONFIG_SPIRAM_SPEED_80M=1
     -DCONFIG_SPIRAM_USE_MALLOC=1
-    ; Audio Hardware Pinout (UDA1334A I2S DAC)
     -DCONFIG_I2S_BCLK_PIN=14
     -DCONFIG_I2S_WSEL_PIN=15
     -DCONFIG_I2S_DIN_PIN=16
-    ; 1024KB Ringbuffer in Octal PSRAM
     -DCONFIG_AUDIO_RINGBUF_SIZE=1048576
+
+; Enable ESP-IDF Component Manager for external components (mdns, etc.)
+build_unflags = -Werror=all
 
 ; Serial Upload & Monitor settings
 upload_speed = 921600
@@ -145,7 +145,7 @@ monitor_filters = esp32_exception_decoder, direct
 extra_scripts = post:scripts/pio_merge_bin.py
 
 ; ------------------------------------------------------------------------------
-; Optional Arduino-as-Component environment (if migrating to Arduino Core)
+; Optional Arduino Core Environment
 ; ------------------------------------------------------------------------------
 [env:esp32s3_arduino]
 platform = espressif32 @ ~6.6.0
@@ -173,7 +173,10 @@ monitor_speed = 115200
     language: 'cmake',
     content: `cmake_minimum_required(VERSION 3.16)
 
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# Register project-level components directory so components like mdns resolve automatically
+list(APPEND EXTRA_COMPONENT_DIRS "\${CMAKE_CURRENT_LIST_DIR}/components")
+
+include(\$ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32s3_wifi_music)
 `
   },
@@ -263,7 +266,6 @@ storage,  data, spiffs,  0xd20000, 0x2e0000,
     REQUIRES
         esp_wifi
         nvs_flash
-        mdns
         esp_http_server
         esp_http_client
         esp_partition
@@ -403,12 +405,20 @@ void wifi_manager_get_config(wifi_config_storage_t *config);
     language: 'c',
     content: `#include "wifi_manager.h"
 #include <string.h>
+#include <stdio.h>
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "mdns.h"
 #include "lwip/inet.h"
+
+// Optional mDNS support (only if mdns component is present in ESP-IDF)
+#if __has_include("mdns.h")
+#include "mdns.h"
+#define HAVE_MDNS 1
+#else
+#define HAVE_MDNS 0
+#endif
 
 static const char *TAG = "WIFI_MGR";
 static bool s_sta_connected = false;
@@ -435,12 +445,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 static void init_mdns(const char *hostname)
 {
-    ESP_ERROR_CHECK(mdns_init());
-    ESP_ERROR_CHECK(mdns_hostname_set(hostname));
-    ESP_ERROR_CHECK(mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer"));
+#if HAVE_MDNS
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS init returned: %d", err);
+        return;
+    }
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer");
 
     // Register Web UI service
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 
     // Register AirPlay / RAOP services
     mdns_txt_item_t raop_txt[] = {
@@ -453,10 +468,13 @@ static void init_mdns(const char *hostname)
         {"ss", "16"},
         {"sr", "44100"}
     };
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8));
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0));
+    mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8);
+    mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0);
 
     ESP_LOGI(TAG, "mDNS active: http://%s.local", hostname);
+#else
+    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
+#endif
 }
 
 void wifi_manager_init(void)
@@ -483,11 +501,11 @@ void wifi_manager_init(void)
         nvs_close(nvs_h);
     } else {
         strncpy(s_config.ap_ssid, DEFAULT_AP_SSID, sizeof(s_config.ap_ssid));
-        s_config.ap_password[0] = '\\0';
+        s_config.ap_password[0] = '\0';
         s_config.ap_keep_open = true;
         strncpy(s_config.mdns_host, DEFAULT_MDNS_HOST, sizeof(s_config.mdns_host));
-        s_config.sta_ssid[0] = '\\0';
-        s_config.sta_password[0] = '\\0';
+        s_config.sta_ssid[0] = '\0';
+        s_config.sta_password[0] = '\0';
     }
 
     // Set concurrent AP+STA mode so SoftAP stays available even when connected to router
@@ -538,6 +556,36 @@ esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *passwo
 }
 
 bool wifi_manager_is_sta_connected(void) { return s_sta_connected; }
+
+void wifi_manager_get_sta_ip(char *ip_str, size_t max_len)
+{
+    if (!s_sta_connected || !s_netif_sta) {
+        strncpy(ip_str, "0.0.0.0", max_len);
+        return;
+    }
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(s_netif_sta, &ip_info) == ESP_OK) {
+        snprintf(ip_str, max_len, IPSTR, IP2STR(&ip_info.ip));
+    } else {
+        strncpy(ip_str, "0.0.0.0", max_len);
+    }
+}
+
+int8_t wifi_manager_get_sta_rssi(void)
+{
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        return ap_info.rssi;
+    }
+    return -127;
+}
+
+void wifi_manager_get_config(wifi_config_storage_t *config)
+{
+    if (config) {
+        memcpy(config, &s_config, sizeof(wifi_config_storage_t));
+    }
+}
 `
   },
   {
@@ -1744,8 +1792,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install esptool
-        run: pip install esptool
+      - name: Install esptool & idf-component-manager
+        run: pip install esptool idf-component-manager
 
       - name: Build ESP-IDF Firmware in Container
         uses: espressif/esp-idf-ci-action@v1
@@ -1783,8 +1831,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install PlatformIO Core
-        run: pip install --upgrade platformio esptool
+      - name: Install PlatformIO Core & IDF Component Manager
+        run: |
+          pip install --upgrade platformio esptool idf-component-manager
+
+      - name: Install ESP-IDF Submodules or Pre-resolve Components
+        run: |
+          python -m idf_component_manager.core --project-dir . prepare-dependencies
 
       - name: PlatformIO Build
         run: pio run -e esp32s3_espidf

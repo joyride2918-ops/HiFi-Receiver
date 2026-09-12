@@ -1,11 +1,19 @@
 #include "wifi_manager.h"
 #include <string.h>
+#include <stdio.h>
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "mdns.h"
 #include "lwip/inet.h"
+
+// Optional mDNS support (only if mdns component is present in ESP-IDF)
+#if __has_include("mdns.h")
+#include "mdns.h"
+#define HAVE_MDNS 1
+#else
+#define HAVE_MDNS 0
+#endif
 
 static const char *TAG = "WIFI_MGR";
 static bool s_sta_connected = false;
@@ -32,12 +40,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 static void init_mdns(const char *hostname)
 {
-    ESP_ERROR_CHECK(mdns_init());
-    ESP_ERROR_CHECK(mdns_hostname_set(hostname));
-    ESP_ERROR_CHECK(mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer"));
+#if HAVE_MDNS
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS init returned: %d", err);
+        return;
+    }
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer");
 
     // Register Web UI service
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 
     // Register AirPlay / RAOP services
     mdns_txt_item_t raop_txt[] = {
@@ -50,10 +63,13 @@ static void init_mdns(const char *hostname)
         {"ss", "16"},
         {"sr", "44100"}
     };
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8));
-    ESP_ERROR_CHECK(mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0));
+    mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8);
+    mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0);
 
     ESP_LOGI(TAG, "mDNS active: http://%s.local", hostname);
+#else
+    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
+#endif
 }
 
 void wifi_manager_init(void)
@@ -135,3 +151,33 @@ esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *passwo
 }
 
 bool wifi_manager_is_sta_connected(void) { return s_sta_connected; }
+
+void wifi_manager_get_sta_ip(char *ip_str, size_t max_len)
+{
+    if (!s_sta_connected || !s_netif_sta) {
+        strncpy(ip_str, "0.0.0.0", max_len);
+        return;
+    }
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(s_netif_sta, &ip_info) == ESP_OK) {
+        snprintf(ip_str, max_len, IPSTR, IP2STR(&ip_info.ip));
+    } else {
+        strncpy(ip_str, "0.0.0.0", max_len);
+    }
+}
+
+int8_t wifi_manager_get_sta_rssi(void)
+{
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        return ap_info.rssi;
+    }
+    return -127;
+}
+
+void wifi_manager_get_config(wifi_config_storage_t *config)
+{
+    if (config) {
+        memcpy(config, &s_config, sizeof(wifi_config_storage_t));
+    }
+}

@@ -14,7 +14,6 @@ idf_component_register(
     REQUIRES
         esp_wifi
         nvs_flash
-        mdns
         esp_http_server
         esp_http_client
         esp_partition
