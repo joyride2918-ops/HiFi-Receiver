@@ -37,9 +37,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: esp32s3-firmware-binaries
+          if-no-files-found: warn
           path: |
             build/merged.bin
             build/esp32s3_audio.bin
+            build/esp32s3_wifi_music.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
