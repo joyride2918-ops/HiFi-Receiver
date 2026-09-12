@@ -1,0 +1,65 @@
+name: ESP32-S3 Firmware Build & Release
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-esp-idf:
+    name: Build ESP-IDF & Generate merged.bin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install esptool
+        run: pip install esptool
+
+      - name: Build ESP-IDF Firmware in Container
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.2.1
+          target: esp32s3
+          path: '.'
+
+      - name: Generate Monolithic merged.bin (0x0 Flash Image)
+        run: |
+          python scripts/merge_bin.py
+
+      - name: Upload Build Artifacts (including merged.bin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-firmware-binaries
+          path: |
+            build/merged.bin
+            build/esp32s3_audio.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            flash.sh
+            flash.bat
+
+  build-platformio:
+    name: Build PlatformIO Target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio esptool
+
+      - name: PlatformIO Build
+        run: pio run -e esp32s3_espidf

@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "wifi_manager.c"
+        "audio_pipeline.c"
+        "airplay_server.c"
+        "dlna_renderer.c"
+        "http_streamer.c"
+        "dsp_eq.c"
+        "ota_engine.c"
+        "web_server.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_wifi
+        nvs_flash
+        mdns
+        esp_http_server
+        esp_http_client
+        esp_partition
+        app_update
+        driver
+        esp_netif
+        mbedtls
+        lwip
+)
