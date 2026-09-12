@@ -92,6 +92,39 @@ static void airplay_rtsp_task(void *pvParameters)
                     "Audio-Latency: 2205\r\n\r\n",
                     cseq);
                 send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "SET_PARAMETER")) {
+                // Parse volume parameter from Apple device
+                char *vol_pos = strstr(buffer, "volume:");
+                if (vol_pos) {
+                    float db = 0.0f;
+                    if (sscanf(vol_pos + 7, "%f", &db) == 1) {
+                        // Volume is in dB: -144.0 (mute) to 0.0 (100%)
+                        int pct = 0;
+                        if (db > -30.0f) {
+                            pct = (int)((db + 30.0f) * (100.0f / 30.0f));
+                        }
+                        if (pct < 0) pct = 0;
+                        if (pct > 100) pct = 100;
+                        audio_pipeline_set_volume((uint8_t)pct);
+                    }
+                }
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\r\n"
+                    "CSeq: %d\r\n\r\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "FLUSH")) {
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\r\n"
+                    "CSeq: %d\r\n\r\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "GET_PARAMETER")) {
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\r\n"
+                    "CSeq: %d\r\n\r\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
             } else if (strstr(buffer, "TEARDOWN")) {
                 snprintf(resp, sizeof(resp),
                     "RTSP/1.0 200 OK\r\n"

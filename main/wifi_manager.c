@@ -21,6 +21,80 @@ static esp_netif_t *s_netif_ap = NULL;
 static esp_netif_t *s_netif_sta = NULL;
 static wifi_config_storage_t s_config;
 
+static void init_mdns(const char *hostname)
+{
+#if HAVE_MDNS
+    static bool s_mdns_initialized = false;
+    if (!s_mdns_initialized) {
+        esp_err_t err = mdns_init();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS init returned: %d", err);
+            return;
+        }
+        s_mdns_initialized = true;
+    }
+
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set("ESP32-S3 Hi-Fi");
+
+    // Remove existing services if re-initializing after IP acquisition
+    mdns_service_remove("_http", "_tcp");
+    mdns_service_remove("_raop", "_tcp");
+    mdns_service_remove("_airplay", "_tcp");
+
+    // 1. Web UI service
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+
+    // 2. AirPlay / RAOP Services (iOS requires MAC@DeviceName format for RAOP discovery)
+    uint8_t mac[6] = {0};
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+
+    char mac_nocolon[16];
+    snprintf(mac_nocolon, sizeof(mac_nocolon), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    char raop_name[64];
+    snprintf(raop_name, sizeof(raop_name), "%s@ESP32-S3 Hi-Fi", mac_nocolon);
+
+    char mac_colon[20];
+    snprintf(mac_colon, sizeof(mac_colon), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    mdns_txt_item_t raop_txt[] = {
+        {"txtvers", "1"},
+        {"ch", "2"},
+        {"cn", "0,1"},
+        {"et", "0,1"},
+        {"sv", "false"},
+        {"da", "true"},
+        {"sr", "44100"},
+        {"ss", "16"},
+        {"vn", "65537"},
+        {"tp", "UDP"},
+        {"md", "0,1,2"},
+        {"sm", "false"},
+        {"ek", "1"}
+    };
+    mdns_service_add(raop_name, "_raop", "_tcp", 5000, raop_txt, sizeof(raop_txt)/sizeof(raop_txt[0]));
+
+    // 3. AirPlay Service (Port 7000)
+    mdns_txt_item_t airplay_txt[] = {
+        {"deviceid", mac_colon},
+        {"features", "0x5A7FFFF7,0x1E"},
+        {"flags", "0x4"},
+        {"model", "AudioAccessory1,1"},
+        {"srcvers", "220.68"},
+        {"pw", "false"},
+        {"vv", "2"}
+    };
+    mdns_service_add("ESP32-S3 Hi-Fi", "_airplay", "_tcp", 7000, airplay_txt, sizeof(airplay_txt)/sizeof(airplay_txt[0]));
+
+    ESP_LOGI(TAG, "mDNS AirPlay active: %s, URL: http://%s.local", raop_name, hostname);
+#else
+    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
+#endif
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
@@ -35,41 +109,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         s_sta_connected = true;
         ESP_LOGI(TAG, "Connected! IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+        // Announce AirPlay and Web services on newly obtained Station IP
+        init_mdns(s_config.mdns_host);
     }
-}
-
-static void init_mdns(const char *hostname)
-{
-#if HAVE_MDNS
-    esp_err_t err = mdns_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS init returned: %d", err);
-        return;
-    }
-    mdns_hostname_set(hostname);
-    mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer");
-
-    // Register Web UI service
-    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-
-    // Register AirPlay / RAOP services
-    mdns_txt_item_t raop_txt[] = {
-        {"tp", "UDP"},
-        {"sm", "false"},
-        {"sv", "false"},
-        {"da", "true"},
-        {"vn", "65537"},
-        {"ch", "2"},
-        {"ss", "16"},
-        {"sr", "44100"}
-    };
-    mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8);
-    mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0);
-
-    ESP_LOGI(TAG, "mDNS active: http://%s.local", hostname);
-#else
-    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
-#endif
 }
 
 void wifi_manager_init(void)

@@ -469,6 +469,80 @@ static esp_netif_t *s_netif_ap = NULL;
 static esp_netif_t *s_netif_sta = NULL;
 static wifi_config_storage_t s_config;
 
+static void init_mdns(const char *hostname)
+{
+#if HAVE_MDNS
+    static bool s_mdns_initialized = false;
+    if (!s_mdns_initialized) {
+        esp_err_t err = mdns_init();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS init returned: %d", err);
+            return;
+        }
+        s_mdns_initialized = true;
+    }
+
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set("ESP32-S3 Hi-Fi");
+
+    // Remove existing services if re-initializing after IP acquisition
+    mdns_service_remove("_http", "_tcp");
+    mdns_service_remove("_raop", "_tcp");
+    mdns_service_remove("_airplay", "_tcp");
+
+    // 1. Web UI service
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+
+    // 2. AirPlay / RAOP Services (iOS requires MAC@DeviceName format for RAOP discovery)
+    uint8_t mac[6] = {0};
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+
+    char mac_nocolon[16];
+    snprintf(mac_nocolon, sizeof(mac_nocolon), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    char raop_name[64];
+    snprintf(raop_name, sizeof(raop_name), "%s@ESP32-S3 Hi-Fi", mac_nocolon);
+
+    char mac_colon[20];
+    snprintf(mac_colon, sizeof(mac_colon), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    mdns_txt_item_t raop_txt[] = {
+        {"txtvers", "1"},
+        {"ch", "2"},
+        {"cn", "0,1"},
+        {"et", "0,1"},
+        {"sv", "false"},
+        {"da", "true"},
+        {"sr", "44100"},
+        {"ss", "16"},
+        {"vn", "65537"},
+        {"tp", "UDP"},
+        {"md", "0,1,2"},
+        {"sm", "false"},
+        {"ek", "1"}
+    };
+    mdns_service_add(raop_name, "_raop", "_tcp", 5000, raop_txt, sizeof(raop_txt)/sizeof(raop_txt[0]));
+
+    // 3. AirPlay Service (Port 7000)
+    mdns_txt_item_t airplay_txt[] = {
+        {"deviceid", mac_colon},
+        {"features", "0x5A7FFFF7,0x1E"},
+        {"flags", "0x4"},
+        {"model", "AudioAccessory1,1"},
+        {"srcvers", "220.68"},
+        {"pw", "false"},
+        {"vv", "2"}
+    };
+    mdns_service_add("ESP32-S3 Hi-Fi", "_airplay", "_tcp", 7000, airplay_txt, sizeof(airplay_txt)/sizeof(airplay_txt[0]));
+
+    ESP_LOGI(TAG, "mDNS AirPlay active: %s, URL: http://%s.local", raop_name, hostname);
+#else
+    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
+#endif
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
@@ -483,41 +557,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         s_sta_connected = true;
         ESP_LOGI(TAG, "Connected! IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+        // Announce AirPlay and Web services on newly obtained Station IP
+        init_mdns(s_config.mdns_host);
     }
-}
-
-static void init_mdns(const char *hostname)
-{
-#if HAVE_MDNS
-    esp_err_t err = mdns_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS init returned: %d", err);
-        return;
-    }
-    mdns_hostname_set(hostname);
-    mdns_instance_name_set("ESP32-S3 Hi-Fi Audio Streamer");
-
-    // Register Web UI service
-    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-
-    // Register AirPlay / RAOP services
-    mdns_txt_item_t raop_txt[] = {
-        {"tp", "UDP"},
-        {"sm", "false"},
-        {"sv", "false"},
-        {"da", "true"},
-        {"vn", "65537"},
-        {"ch", "2"},
-        {"ss", "16"},
-        {"sr", "44100"}
-    };
-    mdns_service_add(NULL, "_raop", "_tcp", 5000, raop_txt, 8);
-    mdns_service_add(NULL, "_airplay", "_tcp", 7000, NULL, 0);
-
-    ESP_LOGI(TAG, "mDNS active: http://%s.local", hostname);
-#else
-    ESP_LOGI(TAG, "mDNS component not present. Web UI accessible at station IP.");
-#endif
 }
 
 void wifi_manager_init(void)
@@ -1008,6 +1050,39 @@ static void airplay_rtsp_task(void *pvParameters)
                     "Audio-Latency: 2205\\r\\n\\r\\n",
                     cseq);
                 send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "SET_PARAMETER")) {
+                // Parse volume parameter from Apple device
+                char *vol_pos = strstr(buffer, "volume:");
+                if (vol_pos) {
+                    float db = 0.0f;
+                    if (sscanf(vol_pos + 7, "%f", &db) == 1) {
+                        // Volume is in dB: -144.0 (mute) to 0.0 (100%)
+                        int pct = 0;
+                        if (db > -30.0f) {
+                            pct = (int)((db + 30.0f) * (100.0f / 30.0f));
+                        }
+                        if (pct < 0) pct = 0;
+                        if (pct > 100) pct = 100;
+                        audio_pipeline_set_volume((uint8_t)pct);
+                    }
+                }
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n\\r\\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "FLUSH")) {
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n\\r\\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
+            } else if (strstr(buffer, "GET_PARAMETER")) {
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n\\r\\n",
+                    cseq);
+                send(client_sock, resp, strlen(resp), 0);
             } else if (strstr(buffer, "TEARDOWN")) {
                 snprintf(resp, sizeof(resp),
                     "RTSP/1.0 200 OK\\r\\n"
@@ -1121,10 +1196,12 @@ const char* dlna_renderer_get_current_uri(void);
     language: 'c',
     content: `#include "dlna_renderer.h"
 #include <string.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "esp_log.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "DLNA_UPNP";
 static bool s_active = false;
@@ -1134,6 +1211,12 @@ static void dlna_ssdp_task(void *pvParameters)
 {
     // SSDP Multicast Listener 239.255.255.250:1900
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Failed to create SSDP socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(DLNA_SSDP_PORT),
@@ -1141,6 +1224,10 @@ static void dlna_ssdp_task(void *pvParameters)
     };
     int opt = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    // Set non-blocking or 1-second timeout so we can periodically send NOTIFY
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     bind(sock, (struct sockaddr *)&addr, sizeof(addr));
 
@@ -1152,24 +1239,59 @@ static void dlna_ssdp_task(void *pvParameters)
     ESP_LOGI(TAG, "DLNA / UPnP MediaRenderer SSDP discovery active on port 1900");
 
     char buffer[1024];
+    uint32_t last_notify = 0;
+
+    struct sockaddr_in mcast_dst = {
+        .sin_family = AF_INET,
+        .sin_port = htons(DLNA_SSDP_PORT),
+        .sin_addr.s_addr = inet_addr("239.255.255.250")
+    };
+
     while (1) {
         struct sockaddr_in from;
         socklen_t from_len = sizeof(from);
         int len = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&from, &from_len);
+
+        char current_ip[32] = "192.168.4.1";
+        if (wifi_manager_is_sta_connected()) {
+            wifi_manager_get_sta_ip(current_ip, sizeof(current_ip));
+        }
+
         if (len > 0) {
             buffer[len] = '\\0';
-            if (strstr(buffer, "M-SEARCH") && (strstr(buffer, "MediaRenderer") || strstr(buffer, "AVTransport") || strstr(buffer, "ssdp:all"))) {
-                const char *reply = 
+            if (strstr(buffer, "M-SEARCH") && (strstr(buffer, "MediaRenderer") || strstr(buffer, "AVTransport") || strstr(buffer, "ssdp:all") || strstr(buffer, "rootdevice"))) {
+                char reply[512];
+                snprintf(reply, sizeof(reply),
                     "HTTP/1.1 200 OK\\r\\n"
                     "CACHE-CONTROL: max-age=1800\\r\\n"
                     "EXT:\\r\\n"
-                    "LOCATION: http://esp32-audio.local/description.xml\\r\\n"
+                    "LOCATION: http://%s/description.xml\\r\\n"
                     "SERVER: ESP32-S3/1.0 UPnP/1.0 DLNADOC/1.50\\r\\n"
                     "ST: urn:schemas-upnp-org:device:MediaRenderer:1\\r\\n"
-                    "USN: uuid:12345678-90ab-cdef-1234-567890abcdef::urn:schemas-upnp-org:device:MediaRenderer:1\\r\\n\\r\\n";
+                    "USN: uuid:12345678-90ab-cdef-1234-567890abcdef::urn:schemas-upnp-org:device:MediaRenderer:1\\r\\n\\r\\n",
+                    current_ip);
                 sendto(sock, reply, strlen(reply), 0, (struct sockaddr *)&from, from_len);
             }
         }
+
+        // Periodic SSDP NOTIFY alive broadcast every 20 seconds
+        uint32_t now = xTaskGetTickCount();
+        if ((now - last_notify) > pdMS_TO_TICKS(20000)) {
+            last_notify = now;
+            char notify[512];
+            snprintf(notify, sizeof(notify),
+                "NOTIFY * HTTP/1.1\\r\\n"
+                "HOST: 239.255.255.250:1900\\r\\n"
+                "CACHE-CONTROL: max-age=1800\\r\\n"
+                "LOCATION: http://%s/description.xml\\r\\n"
+                "NT: urn:schemas-upnp-org:device:MediaRenderer:1\\r\\n"
+                "NTS: ssdp:alive\\r\\n"
+                "SERVER: ESP32-S3/1.0 UPnP/1.0 DLNADOC/1.50\\r\\n"
+                "USN: uuid:12345678-90ab-cdef-1234-567890abcdef::urn:schemas-upnp-org:device:MediaRenderer:1\\r\\n\\r\\n",
+                current_ip);
+            sendto(sock, notify, strlen(notify), 0, (struct sockaddr *)&mcast_dst, sizeof(mcast_dst));
+        }
+
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
