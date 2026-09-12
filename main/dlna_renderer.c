@@ -37,12 +37,12 @@ static void dlna_ssdp_task(void *pvParameters)
         int len = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&from, &from_len);
         if (len > 0) {
             buffer[len] = '\0';
-            if (strstr(buffer, "M-SEARCH") && (strstr(buffer, "MediaRenderer") || strstr(buffer, "ssdp:all"))) {
+            if (strstr(buffer, "M-SEARCH") && (strstr(buffer, "MediaRenderer") || strstr(buffer, "AVTransport") || strstr(buffer, "ssdp:all"))) {
                 const char *reply = 
                     "HTTP/1.1 200 OK\r\n"
                     "CACHE-CONTROL: max-age=1800\r\n"
                     "EXT:\r\n"
-                    "LOCATION: http://esp32-audio.local:49152/description.xml\r\n"
+                    "LOCATION: http://esp32-audio.local/description.xml\r\n"
                     "SERVER: ESP32-S3/1.0 UPnP/1.0 DLNADOC/1.50\r\n"
                     "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n"
                     "USN: uuid:12345678-90ab-cdef-1234-567890abcdef::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";

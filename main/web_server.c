@@ -49,7 +49,7 @@ static const char INDEX_HTML[] =
       "<div style=\"display:flex;align-items:center;gap:8px\">"
         "<h1>ESP32-S3 Hi-Fi</h1>"
         "<span class=\"badge\">UDA1334A</span>"
-      </div>"
+      "</div>"
       "<p>Wi-Fi & Audio Streamer Setup</p>"
     "</div>"
   "</div>"
@@ -80,8 +80,35 @@ static const char INDEX_HTML[] =
     "</div>"
     "<input type=\"range\" id=\"vol-slider\" class=\"vol-slider\" min=\"0\" max=\"100\" value=\"80\" oninput=\"setVol(this.value)\">"
   "</div>"
+  "<div style=\"margin-top:16px;padding-top:14px;border-top:1px solid #27272a\">"
+    "<div style=\"font-size:12px;font-weight:700;color:#a1a1aa;text-transform:uppercase;margin-bottom:8px\">3-Band DSP Equalizer</div>"
+    "<div style=\"display:flex;align-items:center;margin-top:6px;font-size:12px\">"
+      "<span style=\"width:50px\">Bass</span>"
+      "<input type=\"range\" id=\"eq-b\" style=\"flex:1;margin:0 8px;accent-color:#06b6d4\" min=\"-12\" max=\"12\" value=\"0\" oninput=\"setEQ()\">"
+      "<span id=\"eq-b-val\" style=\"width:45px;text-align:right;color:#06b6d4\">0 dB</span>"
+    "</div>"
+    "<div style=\"display:flex;align-items:center;margin-top:6px;font-size:12px\">"
+      "<span style=\"width:50px\">Mid</span>"
+      "<input type=\"range\" id=\"eq-m\" style=\"flex:1;margin:0 8px;accent-color:#06b6d4\" min=\"-12\" max=\"12\" value=\"0\" oninput=\"setEQ()\">"
+      "<span id=\"eq-m-val\" style=\"width:45px;text-align:right;color:#06b6d4\">0 dB</span>"
+    "</div>"
+    "<div style=\"display:flex;align-items:center;margin-top:6px;font-size:12px\">"
+      "<span style=\"width:50px\">Treble</span>"
+      "<input type=\"range\" id=\"eq-t\" style=\"flex:1;margin:0 8px;accent-color:#06b6d4\" min=\"-12\" max=\"12\" value=\"0\" oninput=\"setEQ()\">"
+      "<span id=\"eq-t-val\" style=\"width:45px;text-align:right;color:#06b6d4\">0 dB</span>"
+    "</div>"
+  "</div>"
+  "<div style=\"margin-top:16px;padding-top:14px;border-top:1px solid #27272a\">"
+    "<div style=\"font-size:12px;font-weight:700;color:#a1a1aa;text-transform:uppercase;margin-bottom:8px\">Audio Stream Player</div>"
+    "<input type=\"text\" id=\"stream-url\" placeholder=\"http://stream.radioparadise.com/mellow-128\">"
+    "<div style=\"display:flex;gap:6px;margin-top:8px\">"
+      "<button class=\"btn\" onclick=\"playStream()\" style=\"margin-top:0;flex:2\">Play URL</button>"
+      "<button class=\"btn\" onclick=\"stopStream()\" style=\"margin-top:0;flex:1;background:#27272a;color:#fff\">Stop</button>"
+    "</div>"
+  "</div>"
 "</div>"
 "<script>"
+"let eqTimer;"
 "async function pollStatus() {"
   "try {"
     "const res = await fetch('/api/status');"
@@ -96,6 +123,16 @@ static const char INDEX_HTML[] =
     "if (d.volume !== undefined) {"
       "document.getElementById('vol-slider').value = d.volume;"
       "document.getElementById('vol-lbl').innerText = d.volume + '%';"
+    "}"
+    "if (d.airplay_active) {"
+      "document.getElementById('ap-stat').innerText = 'AirPlay Streaming';"
+      "document.getElementById('ap-stat').style.color = '#4ade80';"
+    "} else if (d.http_playing) {"
+      "document.getElementById('ap-stat').innerText = 'Radio Streaming';"
+      "document.getElementById('ap-stat').style.color = '#4ade80';"
+    "} else {"
+      "document.getElementById('ap-stat').innerText = 'Ready (AirPlay/DLNA)';"
+      "document.getElementById('ap-stat').style.color = '#22d3ee';"
     "}"
   "} catch(e) {}"
 "}"
@@ -129,6 +166,34 @@ static const char INDEX_HTML[] =
       "body: JSON.stringify({volume: parseInt(v)})"
     "});"
   "} catch(e) {}"
+"}"
+"function setEQ() {"
+  "const b = parseFloat(document.getElementById('eq-b').value);"
+  "const m = parseFloat(document.getElementById('eq-m').value);"
+  "const t = parseFloat(document.getElementById('eq-t').value);"
+  "document.getElementById('eq-b-val').innerText = (b > 0 ? '+' : '') + b + ' dB';"
+  "document.getElementById('eq-m-val').innerText = (m > 0 ? '+' : '') + m + ' dB';"
+  "document.getElementById('eq-t-val').innerText = (t > 0 ? '+' : '') + t + ' dB';"
+  "clearTimeout(eqTimer);"
+  "eqTimer = setTimeout(async () => {"
+    "try {"
+      "await fetch('/api/eq', {"
+        "method: 'POST',"
+        "headers: {'Content-Type': 'application/json'},"
+        "body: JSON.stringify({bass: b, mid: m, treble: t})"
+      "});"
+    "} catch(e) {}"
+  "}, 150);"
+"}"
+"async function playStream() {"
+  "const url = document.getElementById('stream-url').value.trim();"
+  "if (!url) return;"
+  "await fetch('/api/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url}) });"
+  "setTimeout(pollStatus, 1000);"
+"}"
+"async function stopStream() {"
+  "await fetch('/api/stop', { method: 'POST' });"
+  "setTimeout(pollStatus, 500);"
 "}"
 "</script>"
 "</body>"
@@ -318,10 +383,78 @@ static esp_err_t api_ota_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t upnp_description_handler(httpd_req_t *req)
+{
+    const char *xml = 
+        "<?xml version=\"1.0\"?>\r\n"
+        "<root xmlns=\"urn:schemas-upnp-org:device-1-0\">\r\n"
+        "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
+        "  <device>\r\n"
+        "    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>\r\n"
+        "    <friendlyName>ESP32-S3 Hi-Fi Audio</friendlyName>\r\n"
+        "    <manufacturer>Espressif</manufacturer>\r\n"
+        "    <modelName>ESP32-S3-UDA1334A</modelName>\r\n"
+        "    <UDN>uuid:12345678-90ab-cdef-1234-567890abcdef</UDN>\r\n"
+        "    <serviceList>\r\n"
+        "      <service>\r\n"
+        "        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>\r\n"
+        "        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>\r\n"
+        "        <controlURL>/upnp/control/AVTransport</controlURL>\r\n"
+        "        <eventSubURL>/upnp/event/AVTransport</eventSubURL>\r\n"
+        "        <SCPDURL>/avtransport.xml</SCPDURL>\r\n"
+        "      </service>\r\n"
+        "    </serviceList>\r\n"
+        "  </device>\r\n"
+        "</root>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, xml, strlen(xml));
+    return ESP_OK;
+}
+
+static esp_err_t upnp_avtransport_handler(httpd_req_t *req)
+{
+    char buf[1024];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret > 0) {
+        buf[ret] = '\0';
+        if (strstr(buf, "SetAVTransportURI")) {
+            char *start = strstr(buf, "<CurrentURI>");
+            char *end = strstr(buf, "</CurrentURI>");
+            if (start && end && end > start + 12) {
+                char uri[256] = {0};
+                size_t len = end - (start + 12);
+                if (len < sizeof(uri)) {
+                    strncpy(uri, start + 12, len);
+                    uri[len] = '\0';
+                    http_streamer_play(uri);
+                }
+            }
+        } else if (strstr(buf, "<u:Play") || strstr(buf, "Play")) {
+            http_streamer_resume();
+        } else if (strstr(buf, "<u:Pause") || strstr(buf, "Pause")) {
+            http_streamer_pause();
+        } else if (strstr(buf, "<u:Stop") || strstr(buf, "Stop")) {
+            http_streamer_stop();
+        }
+    }
+
+    const char *soap_resp = 
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+        "  <s:Body>\r\n"
+        "    <u:Response xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/>\r\n"
+        "  </s:Body>\r\n"
+        "</s:Envelope>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, soap_resp, strlen(soap_resp));
+    return ESP_OK;
+}
+
 esp_err_t web_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 24;
     config.stack_size = 8192;
 
     ESP_LOGI(TAG, "Starting HTTP Web Server on port %d...", config.server_port);
@@ -333,6 +466,10 @@ esp_err_t web_server_start(void)
         httpd_uri_t uri_apple    = { .uri = "/hotspot-detect.html", .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
         httpd_uri_t uri_android  = { .uri = "/generate_204",        .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
         httpd_uri_t uri_win      = { .uri = "/connecttest.txt",     .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
+
+        // DLNA / UPnP MediaRenderer Endpoints
+        httpd_uri_t uri_desc     = { .uri = "/description.xml",           .method = HTTP_GET,  .handler = upnp_description_handler };
+        httpd_uri_t uri_avt      = { .uri = "/upnp/control/AVTransport",  .method = HTTP_POST, .handler = upnp_avtransport_handler };
 
         // REST API Endpoints
         httpd_uri_t uri_status   = { .uri = "/api/status",          .method = HTTP_GET,  .handler = api_status_handler };
@@ -349,6 +486,9 @@ esp_err_t web_server_start(void)
         httpd_register_uri_handler(s_server, &uri_apple);
         httpd_register_uri_handler(s_server, &uri_android);
         httpd_register_uri_handler(s_server, &uri_win);
+
+        httpd_register_uri_handler(s_server, &uri_desc);
+        httpd_register_uri_handler(s_server, &uri_avt);
 
         httpd_register_uri_handler(s_server, &uri_status);
         httpd_register_uri_handler(s_server, &uri_vol);

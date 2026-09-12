@@ -58,6 +58,7 @@ static void stream_worker_task(void *pvParameters)
 
     esp_http_client_cleanup(client);
     s_playing = false;
+    s_stream_task_handle = NULL;
     vTaskDelete(NULL);
 }
 
@@ -66,7 +67,9 @@ void http_streamer_init(void) {}
 esp_err_t http_streamer_play(const char *url)
 {
     http_streamer_stop();
-    strncpy(s_current_url, url, sizeof(s_current_url));
+    if (!url || strlen(url) == 0) return ESP_ERR_INVALID_ARG;
+    strncpy(s_current_url, url, sizeof(s_current_url) - 1);
+    s_current_url[sizeof(s_current_url) - 1] = '\0';
     s_paused = false;
     xTaskCreatePinnedToCore(stream_worker_task, "http_stream_task", 8192, s_current_url, 6, &s_stream_task_handle, 0);
     return ESP_OK;
@@ -74,9 +77,13 @@ esp_err_t http_streamer_play(const char *url)
 
 void http_streamer_stop(void)
 {
-    s_playing = false;
-    s_paused = false;
-    vTaskDelay(pdMS_TO_TICKS(150));
+    if (s_playing) {
+        s_playing = false;
+        s_paused = false;
+        for (int i = 0; i < 30 && s_stream_task_handle != NULL; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
 }
 
 void http_streamer_pause(void) { s_paused = true; }
