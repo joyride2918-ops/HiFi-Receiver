@@ -18,6 +18,9 @@ static void dlna_ssdp_task(void *pvParameters)
         .sin_port = htons(DLNA_SSDP_PORT),
         .sin_addr.s_addr = htonl(INADDR_ANY)
     };
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     bind(sock, (struct sockaddr *)&addr, sizeof(addr));
 
     struct ip_mreq mreq;

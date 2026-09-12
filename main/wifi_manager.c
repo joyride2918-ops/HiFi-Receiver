@@ -130,8 +130,10 @@ void wifi_manager_init(void)
 
 esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *password)
 {
-    strncpy(s_config.sta_ssid, ssid, sizeof(s_config.sta_ssid));
-    strncpy(s_config.sta_password, password, sizeof(s_config.sta_password));
+    strncpy(s_config.sta_ssid, ssid, sizeof(s_config.sta_ssid) - 1);
+    s_config.sta_ssid[sizeof(s_config.sta_ssid) - 1] = '\0';
+    strncpy(s_config.sta_password, password, sizeof(s_config.sta_password) - 1);
+    s_config.sta_password[sizeof(s_config.sta_password) - 1] = '\0';
 
     nvs_handle_t nvs_h;
     esp_err_t err = nvs_open("wifi_cfg", NVS_READWRITE, &nvs_h);
@@ -143,8 +145,10 @@ esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *passwo
 
     // Connect immediately
     wifi_config_t sta_config = {0};
-    strncpy((char *)sta_config.sta.ssid, ssid, sizeof(sta_config.sta.ssid));
-    strncpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password));
+    strncpy((char *)sta_config.sta.ssid, s_config.sta_ssid, sizeof(sta_config.sta.ssid) - 1);
+    sta_config.sta.ssid[sizeof(sta_config.sta.ssid) - 1] = '\0';
+    strncpy((char *)sta_config.sta.password, s_config.sta_password, sizeof(sta_config.sta.password) - 1);
+    sta_config.sta.password[sizeof(sta_config.sta.password) - 1] = '\0';
     esp_wifi_set_config(WIFI_IF_STA, &sta_config);
     esp_wifi_connect();
     return ESP_OK;

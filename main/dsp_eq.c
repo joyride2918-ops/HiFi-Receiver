@@ -73,8 +73,9 @@ void dsp_eq_get_params(dsp_eq_params_t *params)
 
 void dsp_eq_process_pcm16(int16_t *samples, int sample_count)
 {
-    if (!s_params.enabled) return;
+    if (!s_params.enabled || !samples || sample_count < 2) return;
 
+    sample_count &= ~1; // Ensure even number of samples for stereo (L/R) pairs
     for (int i = 0; i < sample_count; i += 2) {
         float l = (float)samples[i];
         float r = (float)samples[i + 1];

@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-#define DEFAULT_AP_SSID      "ESP32-Audio-AP"
+#define DEFAULT_AP_SSID      "ESP32-Audio-Config"
 #define DEFAULT_AP_PASSWORD  ""          // Open by default for easy setup
 #define DEFAULT_AP_CHANNEL   6
 #define DEFAULT_MAX_CLIENTS  4

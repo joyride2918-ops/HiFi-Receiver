@@ -416,7 +416,7 @@ void app_main(void)
 #include <stdint.h>
 #include "esp_err.h"
 
-#define DEFAULT_AP_SSID      "ESP32-Audio-AP"
+#define DEFAULT_AP_SSID      "ESP32-Audio-Config"
 #define DEFAULT_AP_PASSWORD  ""          // Open by default for easy setup
 #define DEFAULT_AP_CHANNEL   6
 #define DEFAULT_MAX_CLIENTS  4
@@ -544,11 +544,11 @@ void wifi_manager_init(void)
         nvs_close(nvs_h);
     } else {
         strncpy(s_config.ap_ssid, DEFAULT_AP_SSID, sizeof(s_config.ap_ssid));
-        s_config.ap_password[0] = '\0';
+        s_config.ap_password[0] = '\\0';
         s_config.ap_keep_open = true;
         strncpy(s_config.mdns_host, DEFAULT_MDNS_HOST, sizeof(s_config.mdns_host));
-        s_config.sta_ssid[0] = '\0';
-        s_config.sta_password[0] = '\0';
+        s_config.sta_ssid[0] = '\\0';
+        s_config.sta_password[0] = '\\0';
     }
 
     // Set concurrent AP+STA mode so SoftAP stays available even when connected to router
@@ -578,8 +578,10 @@ void wifi_manager_init(void)
 
 esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *password)
 {
-    strncpy(s_config.sta_ssid, ssid, sizeof(s_config.sta_ssid));
-    strncpy(s_config.sta_password, password, sizeof(s_config.sta_password));
+    strncpy(s_config.sta_ssid, ssid, sizeof(s_config.sta_ssid) - 1);
+    s_config.sta_ssid[sizeof(s_config.sta_ssid) - 1] = '\\0';
+    strncpy(s_config.sta_password, password, sizeof(s_config.sta_password) - 1);
+    s_config.sta_password[sizeof(s_config.sta_password) - 1] = '\\0';
 
     nvs_handle_t nvs_h;
     esp_err_t err = nvs_open("wifi_cfg", NVS_READWRITE, &nvs_h);
@@ -591,8 +593,10 @@ esp_err_t wifi_manager_save_sta_credentials(const char *ssid, const char *passwo
 
     // Connect immediately
     wifi_config_t sta_config = {0};
-    strncpy((char *)sta_config.sta.ssid, ssid, sizeof(sta_config.sta.ssid));
-    strncpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password));
+    strncpy((char *)sta_config.sta.ssid, s_config.sta_ssid, sizeof(sta_config.sta.ssid) - 1);
+    sta_config.sta.ssid[sizeof(sta_config.sta.ssid) - 1] = '\\0';
+    strncpy((char *)sta_config.sta.password, s_config.sta_password, sizeof(sta_config.sta.password) - 1);
+    sta_config.sta.password[sizeof(sta_config.sta.password) - 1] = '\\0';
     esp_wifi_set_config(WIFI_IF_STA, &sta_config);
     esp_wifi_connect();
     return ESP_OK;
@@ -912,6 +916,7 @@ const char* airplay_server_get_client_name(void);
     language: 'c',
     content: `#include "airplay_server.h"
 #include <string.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -922,6 +927,19 @@ static const char *TAG = "AIRPLAY_2";
 static bool s_active = false;
 static char s_client_name[64] = "Apple Device (AirPlay 2)";
 
+static int extract_cseq(const char *buf)
+{
+    const char *p = strstr(buf, "CSeq:");
+    if (!p) p = strstr(buf, "cseq:");
+    if (p) {
+        int cseq = 1;
+        if (sscanf(p + 5, "%d", &cseq) == 1) {
+            return cseq;
+        }
+    }
+    return 1;
+}
+
 static void airplay_rtsp_task(void *pvParameters)
 {
     int server_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
@@ -930,6 +948,9 @@ static void airplay_rtsp_task(void *pvParameters)
         .sin_port = htons(AIRPLAY_RTSP_PORT),
         .sin_addr.s_addr = htonl(INADDR_ANY)
     };
+
+    int opt = 1;
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
     listen(server_sock, 2);
@@ -954,22 +975,45 @@ static void airplay_rtsp_task(void *pvParameters)
             if (len <= 0) break;
             buffer[len] = '\\0';
 
+            int cseq = extract_cseq(buffer);
+            char resp[512];
+
             // RTSP Session Protocol Parser (OPTIONS, ANNOUNCE, SETUP, RECORD, TEARDOWN)
             if (strstr(buffer, "OPTIONS")) {
-                const char *resp = "RTSP/1.0 200 OK\\r\\nCSeq: 1\\r\\nPublic: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, SET_PARAMETER, GET_PARAMETER\\r\\n\\r\\n";
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n"
+                    "Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, SET_PARAMETER, GET_PARAMETER\\r\\n\\r\\n",
+                    cseq);
                 send(client_sock, resp, strlen(resp), 0);
             } else if (strstr(buffer, "ANNOUNCE")) {
-                const char *resp = "RTSP/1.0 200 OK\\r\\nCSeq: 2\\r\\n\\r\\n";
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n\\r\\n",
+                    cseq);
                 send(client_sock, resp, strlen(resp), 0);
                 audio_pipeline_set_sample_rate(44100, 16);
             } else if (strstr(buffer, "SETUP")) {
-                const char *resp = "RTSP/1.0 200 OK\\r\\nCSeq: 3\\r\\nTransport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=6001;timing_port=6002;server_port=5000\\r\\nSession: 1\\r\\n\\r\\n";
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n"
+                    "Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=6001;timing_port=6002;server_port=5000\\r\\n"
+                    "Session: 1\\r\\n\\r\\n",
+                    cseq);
                 send(client_sock, resp, strlen(resp), 0);
             } else if (strstr(buffer, "RECORD")) {
-                const char *resp = "RTSP/1.0 200 OK\\r\\nCSeq: 4\\r\\nAudio-Latency: 2205\\r\\n\\r\\n";
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n"
+                    "Audio-Latency: 2205\\r\\n\\r\\n",
+                    cseq);
                 send(client_sock, resp, strlen(resp), 0);
             } else if (strstr(buffer, "TEARDOWN")) {
-                const char *resp = "RTSP/1.0 200 OK\\r\\nCSeq: 5\\r\\nConnection: close\\r\\n\\r\\n";
+                snprintf(resp, sizeof(resp),
+                    "RTSP/1.0 200 OK\\r\\n"
+                    "CSeq: %d\\r\\n"
+                    "Connection: close\\r\\n\\r\\n",
+                    cseq);
                 send(client_sock, resp, strlen(resp), 0);
                 break;
             }
@@ -1035,6 +1079,9 @@ static void dlna_ssdp_task(void *pvParameters)
         .sin_port = htons(DLNA_SSDP_PORT),
         .sin_addr.s_addr = htonl(INADDR_ANY)
     };
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     bind(sock, (struct sockaddr *)&addr, sizeof(addr));
 
     struct ip_mreq mreq;
@@ -1306,8 +1353,9 @@ void dsp_eq_get_params(dsp_eq_params_t *params)
 
 void dsp_eq_process_pcm16(int16_t *samples, int sample_count)
 {
-    if (!s_params.enabled) return;
+    if (!s_params.enabled || !samples || sample_count < 2) return;
 
+    sample_count &= ~1; // Ensure even number of samples for stereo (L/R) pairs
     for (int i = 0; i < sample_count; i += 2) {
         float l = (float)samples[i];
         float r = (float)samples[i + 1];
@@ -1383,6 +1431,7 @@ const char* ota_engine_get_running_partition_name(void);
     type: 'file',
     language: 'c',
     content: `#include "ota_engine.h"
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -1494,6 +1543,148 @@ void web_server_stop(void);
 static const char *TAG = "WEB_SERVER";
 static httpd_handle_t s_server = NULL;
 
+static const char INDEX_HTML[] = 
+"<!DOCTYPE html>"
+"<html lang=\\"en\\">"
+"<head>"
+"<meta charset=\\"UTF-8\\">"
+"<meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1.0\\">"
+"<title>ESP32-S3 Hi-Fi Audio</title>"
+"<style>"
+"* { box-sizing: border-box; margin: 0; padding: 0; }"
+"body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #09090b; color: #f4f4f5; padding: 20px; display: flex; justify-content: center; min-height: 100vh; align-items: center; }"
+".card { background: #121215; border: 1px solid #27272a; border-radius: 16px; max-width: 440px; width: 100%; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }"
+".header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }"
+".badge { font-size: 11px; padding: 3px 8px; border-radius: 9999px; background: rgba(6,182,212,0.15); color: #22d3ee; border: 1px solid rgba(6,182,212,0.3); font-weight: 600; }"
+"h1 { font-size: 18px; font-weight: 700; }"
+"p { font-size: 13px; color: #a1a1aa; margin-top: 2px; }"
+".status-row { display: flex; justify-content: space-between; font-size: 12px; margin: 10px 0; padding: 10px 14px; background: #18181b; border-radius: 10px; border: 1px solid #27272a; }"
+".form-group { margin-top: 14px; }"
+"label { display: block; font-size: 12px; font-weight: 600; color: #d4d4d8; margin-bottom: 6px; }"
+"input[type=text], input[type=password] { width: 100%; padding: 10px 14px; background: #18181b; border: 1px solid #3f3f46; border-radius: 10px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; }"
+"input:focus { border-color: #06b6d4; }"
+".btn { width: 100%; margin-top: 18px; padding: 12px; background: #06b6d4; color: #000; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s; }"
+".btn:hover { background: #22d3ee; }"
+".vol-box { margin-top: 20px; padding-top: 16px; border-top: 1px solid #27272a; }"
+".vol-slider { width: 100%; accent-color: #06b6d4; cursor: pointer; margin-top: 8px; }"
+".msg { margin-top: 12px; font-size: 12px; text-align: center; color: #4ade80; display: none; }"
+"</style>"
+"</head>"
+"<body>"
+"<div class=\\"card\\">"
+  "<div class=\\"header\\">"
+    "<div>"
+      "<div style=\\"display:flex;align-items:center;gap:8px\\">"
+        "<h1>ESP32-S3 Hi-Fi</h1>"
+        "<span class=\\"badge\\">UDA1334A</span>"
+      </div>"
+      "<p>Wi-Fi & Audio Streamer Setup</p>"
+    "</div>"
+  "</div>"
+  "<div class=\\"status-row\\">"
+    "<span>AirPlay 2 & DLNA:</span>"
+    "<strong id=\\"ap-stat\\" style=\\"color:#22d3ee\\">Ready (24/7)</strong>"
+  "</div>"
+  "<div class=\\"status-row\\">"
+    "<span>Wi-Fi Connection:</span>"
+    "<strong id=\\"wifi-stat\\" style=\\"color:#fbbf24\\">SoftAP (192.168.4.1)</strong>"
+  "</div>"
+  "<form id=\\"wifi-form\\" onsubmit=\\"saveWifi(event)\\">"
+    "<div class=\\"form-group\\">"
+      "<label for=\\"ssid\\">Home Wi-Fi Network (SSID)</label>"
+      "<input type=\\"text\\" id=\\"ssid\\" placeholder=\\"e.g. MyHomeWiFi\\" required>"
+    "</div>"
+    "<div class=\\"form-group\\">"
+      "<label for=\\"pass\\">Wi-Fi Password</label>"
+      "<input type=\\"password\\" id=\\"pass\\" placeholder=\\"WPA2/WPA3 Password\\">"
+    "</div>"
+    "<button type=\\"submit\\" class=\\"btn\\" id=\\"btn-save\\">Connect to Wi-Fi</button>"
+  "</form>"
+  "<div id=\\"msg\\" class=\\"msg\\">Connecting to Wi-Fi... Please wait!</div>"
+  "<div class=\\"vol-box\\">"
+    "<div style=\\"display:flex;justify-content:space-between;font-size:12px\\">"
+      "<span>Master Volume</span>"
+      "<span id=\\"vol-lbl\\">80%</span>"
+    "</div>"
+    "<input type=\\"range\\" id=\\"vol-slider\\" class=\\"vol-slider\\" min=\\"0\\" max=\\"100\\" value=\\"80\\" oninput=\\"setVol(this.value)\\">"
+  "</div>"
+"</div>"
+"<script>"
+"async function pollStatus() {"
+  "try {"
+    "const res = await fetch('/api/status');"
+    "const d = await res.json();"
+    "if (d.sta_connected && d.sta_ip && d.sta_ip !== '0.0.0.0') {"
+      "document.getElementById('wifi-stat').innerText = 'Connected (' + d.sta_ip + ')';"
+      "document.getElementById('wifi-stat').style.color = '#4ade80';"
+    "} else if (d.sta_connected) {"
+      "document.getElementById('wifi-stat').innerText = 'Connected';"
+      "document.getElementById('wifi-stat').style.color = '#4ade80';"
+    "}"
+    "if (d.volume !== undefined) {"
+      "document.getElementById('vol-slider').value = d.volume;"
+      "document.getElementById('vol-lbl').innerText = d.volume + '%';"
+    "}"
+  "} catch(e) {}"
+"}"
+"setInterval(pollStatus, 3000);"
+"pollStatus();"
+"async function saveWifi(e) {"
+  "e.preventDefault();"
+  "const ssid = document.getElementById('ssid').value;"
+  "const password = document.getElementById('pass').value;"
+  "const msg = document.getElementById('msg');"
+  "msg.style.display = 'block';"
+  "msg.innerText = 'Connecting ESP32-S3 to ' + ssid + '...';"
+  "try {"
+    "await fetch('/api/wifi', {"
+      "method: 'POST',"
+      "headers: {'Content-Type': 'application/json'},"
+      "body: JSON.stringify({ssid, password})"
+    "});"
+    "msg.innerText = 'Credentials saved! ESP32-S3 is connecting...';"
+  "} catch(err) {"
+    "msg.innerText = 'Failed to send credentials.';"
+    "msg.style.color = '#ef4444';"
+  "}"
+"}"
+"async function setVol(v) {"
+  "document.getElementById('vol-lbl').innerText = v + '%';"
+  "try {"
+    "await fetch('/api/volume', {"
+      "method: 'POST',"
+      "headers: {'Content-Type': 'application/json'},"
+      "body: JSON.stringify({volume: parseInt(v)})"
+    "});"
+  "} catch(e) {}"
+"}"
+"</script>"
+"</body>"
+"</html>";
+
+static esp_err_t index_html_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_send(req, INDEX_HTML, strlen(INDEX_HTML));
+    return ESP_OK;
+}
+
+static esp_err_t favicon_handler(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t captive_portal_redirect_handler(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 static esp_err_t api_status_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
@@ -1506,6 +1697,10 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "volume", audio_pipeline_get_volume());
     cJSON_AddStringToObject(root, "active_partition", ota_engine_get_running_partition_name());
     cJSON_AddBoolToObject(root, "sta_connected", wifi_manager_is_sta_connected());
+    char sta_ip_str[32] = {0};
+    wifi_manager_get_sta_ip(sta_ip_str, sizeof(sta_ip_str));
+    cJSON_AddStringToObject(root, "sta_ip", sta_ip_str);
+    cJSON_AddNumberToObject(root, "sta_rssi", wifi_manager_get_sta_rssi());
 
     dsp_eq_params_t eq;
     dsp_eq_get_params(&eq);
@@ -1531,7 +1726,7 @@ static esp_err_t api_volume_handler(httpd_req_t *req)
     char buf[128];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) return ESP_FAIL;
-    buf[ret] = '\0';
+    buf[ret] = '\\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (root) {
@@ -1542,7 +1737,7 @@ static esp_err_t api_volume_handler(httpd_req_t *req)
         cJSON_Delete(root);
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"ok\\"}");
     return ESP_OK;
 }
 
@@ -1551,7 +1746,7 @@ static esp_err_t api_eq_handler(httpd_req_t *req)
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) return ESP_FAIL;
-    buf[ret] = '\0';
+    buf[ret] = '\\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (root) {
@@ -1566,7 +1761,7 @@ static esp_err_t api_eq_handler(httpd_req_t *req)
         cJSON_Delete(root);
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"ok\\"}");
     return ESP_OK;
 }
 
@@ -1575,7 +1770,7 @@ static esp_err_t api_stream_handler(httpd_req_t *req)
     char buf[512];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) return ESP_FAIL;
-    buf[ret] = '\0';
+    buf[ret] = '\\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (root) {
@@ -1586,7 +1781,7 @@ static esp_err_t api_stream_handler(httpd_req_t *req)
         cJSON_Delete(root);
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"streaming_started\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"streaming_started\\"}");
     return ESP_OK;
 }
 
@@ -1594,7 +1789,7 @@ static esp_err_t api_stop_handler(httpd_req_t *req)
 {
     http_streamer_stop();
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"stopped\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"stopped\\"}");
     return ESP_OK;
 }
 
@@ -1603,7 +1798,7 @@ static esp_err_t api_wifi_handler(httpd_req_t *req)
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) return ESP_FAIL;
-    buf[ret] = '\0';
+    buf[ret] = '\\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (root) {
@@ -1616,7 +1811,7 @@ static esp_err_t api_wifi_handler(httpd_req_t *req)
         cJSON_Delete(root);
     }
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"credentials_saved\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"credentials_saved\\"}");
     return ESP_OK;
 }
 
@@ -1647,25 +1842,41 @@ static esp_err_t api_ota_handler(httpd_req_t *req)
 
     ota_engine_end(ota_handle, update_partition);
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_sendstr(req, "{\"status\":\"ota_success_rebooting\"}");
+    httpd_resp_sendstr(req, "{\\"status\\":\\"ota_success_rebooting\\"}");
     return ESP_OK;
 }
 
 esp_err_t web_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20;
     config.stack_size = 8192;
 
     ESP_LOGI(TAG, "Starting HTTP Web Server on port %d...", config.server_port);
     if (httpd_start(&s_server, &config) == ESP_OK) {
-        httpd_uri_t uri_status = { .uri = "/api/status", .method = HTTP_GET,  .handler = api_status_handler };
-        httpd_uri_t uri_vol    = { .uri = "/api/volume", .method = HTTP_POST, .handler = api_volume_handler };
-        httpd_uri_t uri_eq     = { .uri = "/api/eq",     .method = HTTP_POST, .handler = api_eq_handler };
-        httpd_uri_t uri_stream = { .uri = "/api/stream", .method = HTTP_POST, .handler = api_stream_handler };
-        httpd_uri_t uri_stop   = { .uri = "/api/stop",   .method = HTTP_POST, .handler = api_stop_handler };
-        httpd_uri_t uri_wifi   = { .uri = "/api/wifi",   .method = HTTP_POST, .handler = api_wifi_handler };
-        httpd_uri_t uri_ota    = { .uri = "/api/ota",    .method = HTTP_POST, .handler = api_ota_handler };
+        // Embedded Web UI & Captive Portal Endpoints
+        httpd_uri_t uri_root     = { .uri = "/",                   .method = HTTP_GET,  .handler = index_html_handler };
+        httpd_uri_t uri_index    = { .uri = "/index.html",          .method = HTTP_GET,  .handler = index_html_handler };
+        httpd_uri_t uri_favicon  = { .uri = "/favicon.ico",         .method = HTTP_GET,  .handler = favicon_handler };
+        httpd_uri_t uri_apple    = { .uri = "/hotspot-detect.html", .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
+        httpd_uri_t uri_android  = { .uri = "/generate_204",        .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
+        httpd_uri_t uri_win      = { .uri = "/connecttest.txt",     .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
+
+        // REST API Endpoints
+        httpd_uri_t uri_status   = { .uri = "/api/status",          .method = HTTP_GET,  .handler = api_status_handler };
+        httpd_uri_t uri_vol      = { .uri = "/api/volume",          .method = HTTP_POST, .handler = api_volume_handler };
+        httpd_uri_t uri_eq       = { .uri = "/api/eq",              .method = HTTP_POST, .handler = api_eq_handler };
+        httpd_uri_t uri_stream   = { .uri = "/api/stream",          .method = HTTP_POST, .handler = api_stream_handler };
+        httpd_uri_t uri_stop     = { .uri = "/api/stop",            .method = HTTP_POST, .handler = api_stop_handler };
+        httpd_uri_t uri_wifi     = { .uri = "/api/wifi",            .method = HTTP_POST, .handler = api_wifi_handler };
+        httpd_uri_t uri_ota      = { .uri = "/api/ota",             .method = HTTP_POST, .handler = api_ota_handler };
+
+        httpd_register_uri_handler(s_server, &uri_root);
+        httpd_register_uri_handler(s_server, &uri_index);
+        httpd_register_uri_handler(s_server, &uri_favicon);
+        httpd_register_uri_handler(s_server, &uri_apple);
+        httpd_register_uri_handler(s_server, &uri_android);
+        httpd_register_uri_handler(s_server, &uri_win);
 
         httpd_register_uri_handler(s_server, &uri_status);
         httpd_register_uri_handler(s_server, &uri_vol);
