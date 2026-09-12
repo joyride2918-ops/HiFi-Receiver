@@ -13,6 +13,7 @@ idf_component_register(
         "."
     REQUIRES
         esp_wifi
+        esp_event
         nvs_flash
         esp_http_server
         esp_http_client
@@ -27,5 +28,24 @@ idf_component_register(
         esp_timer
         esp_system
         heap
+        freertos
+        json
+    PRIV_REQUIRES
+        json
+        esp_psram
+        esp_event
+        esp_ringbuf
+        esp_http_server
+        esp_http_client
+        esp_partition
+        app_update
+        mbedtls
+        lwip
+        esp_wifi
+        nvs_flash
+        driver
+        heap
+        esp_timer
+        esp_system
         freertos
 )

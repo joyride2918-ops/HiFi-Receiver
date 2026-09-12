@@ -265,6 +265,7 @@ storage,  data, spiffs,  0xd20000, 0x2e0000,
         "."
     REQUIRES
         esp_wifi
+        esp_event
         nvs_flash
         esp_http_server
         esp_http_client
@@ -279,6 +280,25 @@ storage,  data, spiffs,  0xd20000, 0x2e0000,
         esp_timer
         esp_system
         heap
+        freertos
+        json
+    PRIV_REQUIRES
+        json
+        esp_psram
+        esp_event
+        esp_ringbuf
+        esp_http_server
+        esp_http_client
+        esp_partition
+        app_update
+        mbedtls
+        lwip
+        esp_wifi
+        nvs_flash
+        driver
+        heap
+        esp_timer
+        esp_system
         freertos
 )
 `
@@ -1451,6 +1471,7 @@ void web_server_stop(void);
     language: 'c',
     content: `#include "web_server.h"
 #include <string.h>
+#include <stdlib.h>
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "cJSON.h"
@@ -1487,8 +1508,12 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     cJSON_AddItemToObject(root, "eq", eq_obj);
 
     const char *json = cJSON_PrintUnformatted(root);
-    httpd_resp_send(req, json, strlen(json));
-    cJSON_free((void *)json);
+    if (json) {
+        httpd_resp_send(req, json, strlen(json));
+        cJSON_free((void *)json);
+    } else {
+        httpd_resp_sendstr(req, "{}");
+    }
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -1589,7 +1614,7 @@ static esp_err_t api_wifi_handler(httpd_req_t *req)
 
 static esp_err_t api_ota_handler(httpd_req_t *req)
 {
-    esp_ota_handle_t ota_handle;
+    esp_ota_handle_t ota_handle = 0;
     const esp_partition_t *update_partition = NULL;
     esp_err_t err = ota_engine_begin(&ota_handle, &update_partition);
     if (err != ESP_OK) {
@@ -1602,7 +1627,7 @@ static esp_err_t api_ota_handler(httpd_req_t *req)
     int remaining = req->content_len;
 
     while (remaining > 0) {
-        int to_read = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+        int to_read = remaining > (int)sizeof(buf) ? (int)sizeof(buf) : remaining;
         received = httpd_req_recv(req, buf, to_read);
         if (received <= 0) {
             httpd_resp_send_500(req);
@@ -1613,6 +1638,7 @@ static esp_err_t api_ota_handler(httpd_req_t *req)
     }
 
     ota_engine_end(ota_handle, update_partition);
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_sendstr(req, "{\"status\":\"ota_success_rebooting\"}");
     return ESP_OK;
 }
@@ -1625,7 +1651,7 @@ esp_err_t web_server_start(void)
 
     ESP_LOGI(TAG, "Starting HTTP Web Server on port %d...", config.server_port);
     if (httpd_start(&s_server, &config) == ESP_OK) {
-        httpd_uri_t uri_status = { .uri = "/api/status", .method = HTTP_GET, .handler = api_status_handler };
+        httpd_uri_t uri_status = { .uri = "/api/status", .method = HTTP_GET,  .handler = api_status_handler };
         httpd_uri_t uri_vol    = { .uri = "/api/volume", .method = HTTP_POST, .handler = api_volume_handler };
         httpd_uri_t uri_eq     = { .uri = "/api/eq",     .method = HTTP_POST, .handler = api_eq_handler };
         httpd_uri_t uri_stream = { .uri = "/api/stream", .method = HTTP_POST, .handler = api_stream_handler };
