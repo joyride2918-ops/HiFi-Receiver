@@ -1,19 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Radio, 
-  Layers, 
   Github, 
-  Sliders, 
   Wifi, 
+  Cpu, 
   UploadCloud, 
-  HardDrive, 
-  Share2, 
-  Cast, 
   Activity,
   Terminal,
-  ExternalLink,
-  Volume2,
-  Cpu
+  X,
+  Sliders,
+  Airplay,
+  Cast
 } from 'lucide-react';
 
 import { 
@@ -24,7 +21,7 @@ import {
   OTAState, 
   LiveServicesState 
 } from './types';
-import { CURATED_TRACKS, EQ_PRESETS } from './data/radiosAndTrials';
+import { CURATED_TRACKS } from './data/radiosAndTrials';
 import { GITHUB_REPO_FILES } from './data/githubRepoFiles';
 import { audioEngine } from './services/audioEngine';
 import { 
@@ -44,20 +41,31 @@ import {
   saveOta 
 } from './services/storage';
 
-import { MainBanner } from './components/MainBanner';
+import { MinimalStatusHeader } from './components/MinimalStatusHeader';
 import { TopControls } from './components/TopControls';
 import { StreamSelectorTile } from './components/StreamSelectorTile';
 import { DspEqTile } from './components/DspEqTile';
-import { WifiTile } from './components/WifiTile';
-import { OtaTile } from './components/OtaTile';
-import { HardwareSpecsTile } from './components/HardwareSpecsTile';
-import { AirPlayDlnaTile } from './components/AirPlayDlnaTile';
+import { WifiModal } from './components/WifiModal';
+import { AirPlayDlnaModal } from './components/AirPlayDlnaModal';
+import { HardwareModal } from './components/HardwareModal';
+import { OtaModal } from './components/OtaModal';
 import { GitHubRepoExplorer } from './components/GitHubRepoExplorer';
 import { FirmwareBuildsCard } from './components/FirmwareBuildsCard';
 
 export default function App() {
   // Navigation / View Tabs
   const [activeView, setActiveView] = useState<'controller' | 'builds' | 'github'>('controller');
+
+  // Modals Visibility
+  const [isWifiModalOpen, setIsWifiModalOpen] = useState<boolean>(false);
+  const [isAirPlayModalOpen, setIsAirPlayModalOpen] = useState<boolean>(false);
+  const [isHardwareModalOpen, setIsHardwareModalOpen] = useState<boolean>(false);
+  const [isOtaModalOpen, setIsOtaModalOpen] = useState<boolean>(false);
+
+  // Startup Wi-Fi Setup Banner (Only shown at startup, not persistent in main UI)
+  const [showStartupWifiBanner, setShowStartupWifiBanner] = useState<boolean>(() => {
+    return !localStorage.getItem('hifi_wifi_configured');
+  });
 
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -86,7 +94,7 @@ export default function App() {
     airplay2: {
       running: true,
       activeStreaming: false,
-      clientName: 'iPhone 15 Pro (AirPlay)',
+      clientName: 'Apple Device (AirPlay 2)',
       codec: 'Apple ALAC Lossless',
       port: 5000,
       latencyMs: 50
@@ -206,7 +214,6 @@ export default function App() {
       setIsPlaying(true);
       setIsPaused(false);
       
-      // Update services telemetry
       setServices((prev) => ({
         ...prev,
         airplay2: { ...prev.airplay2, activeStreaming: false },
@@ -219,7 +226,6 @@ export default function App() {
       }));
     } catch (err) {
       console.warn('Direct stream autoplay note:', err);
-      // Still set playing state so user knows track is queued
       setIsPlaying(true);
       setIsPaused(false);
     }
@@ -307,6 +313,8 @@ export default function App() {
   const handleSaveWifi = (cfg: WiFiConfig) => {
     setWifiConfig(cfg);
     saveWiFi(cfg);
+    localStorage.setItem('hifi_wifi_configured', 'true');
+    setShowStartupWifiBanner(false);
     setServices((prev) => ({
       ...prev,
       wifi: {
@@ -318,6 +326,11 @@ export default function App() {
         mdnsHost: cfg.mdnsHost
       }
     }));
+  };
+
+  const handleDismissStartupWifi = () => {
+    localStorage.setItem('hifi_wifi_configured', 'true');
+    setShowStartupWifiBanner(false);
   };
 
   // OTA Firmware Handler
@@ -356,32 +369,30 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030303] text-zinc-200 pb-16">
+    <div className="min-h-screen bg-[#040406] text-zinc-200 pb-16">
+      
       {/* Top Application Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-[#000000]/90 backdrop-blur-md border-b border-zinc-900">
+      <header className="sticky top-0 z-40 bg-[#000000]/95 backdrop-blur-md border-b border-zinc-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-emerald-500 p-[1px] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 to-emerald-500 p-[1px] flex items-center justify-center">
               <div className="w-full h-full bg-black rounded-[11px] flex items-center justify-center text-cyan-400">
-                <Radio className="w-5 h-5" />
+                <Radio className="w-4 h-4" />
               </div>
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-sm md:text-base font-bold text-white tracking-tight">
-                  ESP32-S3 Hi-Fi Audio Streamer
+                  ESP32-S3 Hi-Fi
                 </h1>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/40">
                   N16R8 • UDA1334A
                 </span>
               </div>
-              <p className="text-[11px] text-zinc-400">
-                AirPlay 2 • DLNA / UPnP • 3-Band DSP • Dual-Bank OTA
-              </p>
             </div>
           </div>
 
-          {/* Primary View Switcher: AMOLED Controller vs Firmware Builds vs GitHub Repo */}
+          {/* Primary View Switcher */}
           <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800/80">
             <button
               id="tab-view-controller"
@@ -393,8 +404,7 @@ export default function App() {
               }`}
             >
               <Activity className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden sm:inline">AMOLED Controller</span>
-              <span className="sm:hidden">Control</span>
+              <span>Player</span>
             </button>
 
             <button
@@ -407,10 +417,7 @@ export default function App() {
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              <span>Firmware Builds</span>
-              <span className="hidden md:inline text-[9px] px-1.5 py-0.2 rounded bg-black/30 font-mono">
-                merged.bin
-              </span>
+              <span>Binaries</span>
             </button>
 
             <button
@@ -423,45 +430,76 @@ export default function App() {
               }`}
             >
               <Github className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">GitHub Repo</span>
-              <span className="sm:hidden">Repo</span>
+              <span>GitHub Repo</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 space-y-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 space-y-4">
         
-        {/* Requirement #7: Main Banner showing all live services */}
-        <MainBanner
+        {/* Startup Wi-Fi Setup Banner (Only shown on startup, dismissible) */}
+        {showStartupWifiBanner && (
+          <div className="p-3 bg-gradient-to-r from-cyan-950/40 via-zinc-950 to-zinc-950 rounded-xl border border-cyan-800/50 flex items-center justify-between gap-3 text-xs animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <Wifi className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+              <span className="text-zinc-300">
+                <strong className="text-white">Wi-Fi Setup:</strong> Connect your ESP32-S3 to home Wi-Fi for AirPlay 2 & DLNA audio streaming.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsWifiModalOpen(true)}
+                className="px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-lg text-xs transition active:scale-95 shadow-sm"
+              >
+                Configure
+              </button>
+              <button
+                onClick={handleDismissStartupWifi}
+                className="p-1 text-zinc-500 hover:text-zinc-300 transition"
+                title="Dismiss banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Minimal Hi-Fi Status Header (Status icons limited to clean toolbar) */}
+        <MinimalStatusHeader
           services={services}
           activeSourceTitle={currentTrack?.name || 'Idle'}
           isPlaying={isPlaying}
+          onOpenWifiModal={() => setIsWifiModalOpen(true)}
+          onOpenAirPlayModal={() => setIsAirPlayModalOpen(true)}
+          onOpenHardwareModal={() => setIsHardwareModalOpen(true)}
+          onOpenOtaModal={() => setIsOtaModalOpen(true)}
         />
 
-        {/* Requirement #6: Control Buttons at top right after Main Banner */}
-        <TopControls
-          isPlaying={isPlaying}
-          isPaused={isPaused}
-          currentTrack={currentTrack}
-          volume={volume}
-          isMuted={isMuted}
-          vuLeft={vuLeft}
-          vuRight={vuRight}
-          onPlayPause={handlePlayPause}
-          onStop={handleStop}
-          onPrev={handlePrev}
-          onNext={handleNext}
-          onVolumeChange={handleVolumeChange}
-          onToggleMute={handleToggleMute}
-        />
-
-        {/* View 1: AMOLED Live Web Audio Controller (Material 3 Tiles) */}
+        {/* View 1: AMOLED Hi-Fi Player (Clean, Uncluttered, Minimal Design) */}
         {activeView === 'controller' && (
-          <div className="space-y-5">
-            {/* Row 1: Stream & Radio Selector (Req 3, 4, 5) + 3-Band DSP EQ (Req 8) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className="space-y-4">
+            
+            {/* Playback Controls Deck: VU Meters, Transport, Volume */}
+            <TopControls
+              isPlaying={isPlaying}
+              isPaused={isPaused}
+              currentTrack={currentTrack}
+              volume={volume}
+              isMuted={isMuted}
+              vuLeft={vuLeft}
+              vuRight={vuRight}
+              onPlayPause={handlePlayPause}
+              onStop={handleStop}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              onVolumeChange={handleVolumeChange}
+              onToggleMute={handleToggleMute}
+            />
+
+            {/* Clean 2-Column Bento: Stream Selector & 3-Band DSP Equalizer */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
               <div className="lg:col-span-6">
                 <StreamSelectorTile
                   tracks={CURATED_TRACKS}
@@ -481,49 +519,17 @@ export default function App() {
               </div>
             </div>
 
-            {/* Row 2: AirPlay 2 & DLNA Servers (Req 2, 7) + Wi-Fi & mDNS Manager (Req 1) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              <div className="lg:col-span-6">
-                <AirPlayDlnaTile
-                  services={services}
-                  onSimulateAirPlay={handleToggleAirPlaySim}
-                  onSimulateDlna={handleToggleDlnaSim}
-                />
-              </div>
-              <div className="lg:col-span-6">
-                <WifiTile
-                  wifiConfig={wifiConfig}
-                  onSaveWifiConfig={handleSaveWifi}
-                  isStaConnected={services.wifi.staConnected}
-                  staIp={services.wifi.staIp}
-                  staRssi={services.wifi.staRssi}
-                />
-              </div>
-            </div>
-
-            {/* Row 3: Robust OTA Firmware Flasher (Req 9) + Hardware UDA1334A Pinout Specs (Req 2, 11) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              <div className="lg:col-span-6">
-                <OtaTile
-                  otaState={otaState}
-                  onUpdateOtaState={handleUpdateOta}
-                />
-              </div>
-              <div className="lg:col-span-6">
-                <HardwareSpecsTile services={services} />
-              </div>
-            </div>
           </div>
         )}
 
-        {/* View 2: Pre-Built Firmware Binaries (merged.bin, bootloader, app.bin) */}
+        {/* View 2: Firmware Binaries (merged.bin, bootloader, app) */}
         {activeView === 'builds' && (
           <div className="space-y-4">
             <FirmwareBuildsCard />
           </div>
         )}
 
-        {/* View 3: Complete GitHub Repository & ESP-IDF Source Code Explorer */}
+        {/* View 3: Complete GitHub Repository */}
         {activeView === 'github' && (
           <div className="space-y-4">
             <FirmwareBuildsCard />
@@ -531,23 +537,54 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-cyan-400" />
                 <span>
-                  This is the complete, genuine, production-grade ESP-IDF v5.2 / ESP-ADF GitHub project repository for ESP32-S3 N16R8.
+                  Official ESP-IDF v5.2 / FreeRTOS GitHub project repository for ESP32-S3 N16R8.
                 </span>
               </div>
               <span className="text-[11px] font-mono text-emerald-400 font-bold hidden md:inline">
-                All Code Compilable & Functional
+                Clean Modular Architecture
               </span>
             </div>
-
             <GitHubRepoExplorer files={GITHUB_REPO_FILES} />
           </div>
         )}
 
       </main>
 
-      {/* Footer Info */}
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 text-center text-xs text-zinc-600 font-mono">
-        ESP32-S3-WROOM-1 N16R8 • Dual-Core 240MHz • 16MB Flash • 8MB Octal PSRAM • UDA1334A I2S DAC Master • Apache-2.0
+      {/* Interactive Secondary Modals */}
+      <WifiModal
+        isOpen={isWifiModalOpen}
+        onClose={() => setIsWifiModalOpen(false)}
+        wifiConfig={wifiConfig}
+        onSaveWifiConfig={handleSaveWifi}
+        isStaConnected={services.wifi.staConnected}
+        staIp={services.wifi.staIp}
+        staRssi={services.wifi.staRssi}
+      />
+
+      <AirPlayDlnaModal
+        isOpen={isAirPlayModalOpen}
+        onClose={() => setIsAirPlayModalOpen(false)}
+        services={services}
+        onSimulateAirPlay={handleToggleAirPlaySim}
+        onSimulateDlna={handleToggleDlnaSim}
+      />
+
+      <HardwareModal
+        isOpen={isHardwareModalOpen}
+        onClose={() => setIsHardwareModalOpen(false)}
+        services={services}
+      />
+
+      <OtaModal
+        isOpen={isOtaModalOpen}
+        onClose={() => setIsOtaModalOpen(false)}
+        otaState={otaState}
+        onUpdateOtaState={handleUpdateOta}
+      />
+
+      {/* Footer */}
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 text-center text-xs text-zinc-600 font-mono">
+        ESP32-S3 N16R8 • UDA1334A I2S DAC • AirPlay 2 • DLNA • DSP Equalizer
       </footer>
     </div>
   );

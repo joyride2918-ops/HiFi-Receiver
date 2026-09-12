@@ -6,7 +6,7 @@ import {
   Radio, 
   Cpu, 
   HardDrive, 
-  Share2, 
+  Airplay, 
   CheckCircle2, 
   Layers,
   Copy,
@@ -111,7 +111,7 @@ export const MainBanner: React.FC<MainBannerProps> = ({
         }`}>
           <div className="flex items-center justify-between mb-1.5">
             <div className="flex items-center gap-1.5 text-zinc-300">
-              <Share2 className={`w-4 h-4 ${isAirPlayActive ? 'text-cyan-400 animate-pulse' : 'text-zinc-400'}`} />
+              <Airplay className={`w-4 h-4 ${isAirPlayActive ? 'text-cyan-400 animate-pulse' : 'text-zinc-400'}`} />
               <span className="text-xs font-semibold tracking-tight">AirPlay 2</span>
             </div>
             <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${

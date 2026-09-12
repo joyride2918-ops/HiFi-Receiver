@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Share2, 
+  Airplay, 
   Cast, 
   Radio, 
   Server, 
@@ -51,7 +51,7 @@ export const AirPlayDlnaTile: React.FC<AirPlayDlnaTileProps> = ({
         }`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-zinc-200">
-              <Share2 className="w-4 h-4 text-cyan-400" />
+              <Airplay className="w-4 h-4 text-cyan-400" />
               <span className="text-xs font-bold">Apple AirPlay 2 / RAOP</span>
             </div>
             <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
