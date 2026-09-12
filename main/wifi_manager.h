@@ -2,6 +2,8 @@
 #define WIFI_MANAGER_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 #define DEFAULT_AP_SSID      "ESP32-Audio-AP"

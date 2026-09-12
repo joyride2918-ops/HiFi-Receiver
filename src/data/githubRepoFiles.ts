@@ -410,6 +410,8 @@ void app_main(void)
 #define WIFI_MANAGER_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 #define DEFAULT_AP_SSID      "ESP32-Audio-AP"
@@ -1828,23 +1830,23 @@ if __name__ == "__main__":
 import os
 
 def post_build_action(source, target, env):
-    build_dir = env.subst("$BUILD_DIR")
+    build_dir = env.subst("\$BUILD_DIR")
     bootloader = os.path.join(build_dir, "bootloader.bin")
     partitions = os.path.join(build_dir, "partitions.bin")
     app = os.path.join(build_dir, "firmware.bin")
     merged = os.path.join(build_dir, "merged.bin")
 
-    print("\\n[PlatformIO Hook] Merging binaries into monolithic merged.bin...")
+    print("\n[PlatformIO Hook] Merging binaries into monolithic merged.bin...")
     cmd = (
         f"esptool.py --chip esp32s3 merge_bin -o {merged} "
-        f"--flash_mode dio --flash_freq 80m --flash_size 16MB "
+        f"--flash_mode dio --flash_freq 80m --flash_size keep "
         f"0x0 {bootloader} 0x8000 {partitions} 0x20000 {app}"
     )
     res = os.system(cmd)
     if res == 0:
-        print(f"[PlatformIO Hook] ✅ Created {merged} ready for 0x0 flashing!\\n")
+        print(f"[PlatformIO Hook] ✅ Created {merged} ready for 0x0 flashing!\n")
 
-env.AddPostAction("$BUILD_DIR/\${PROGNAME}.bin", post_build_action)
+env.AddPostAction("\$BUILD_DIR/\${PROGNAME}.bin", post_build_action)
 `
   },
   {
