@@ -22,4 +22,5 @@ idf_component_register(
         esp_netif
         mbedtls
         lwip
+        esp_ringbuf
 )
