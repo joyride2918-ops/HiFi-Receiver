@@ -13,8 +13,14 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_psram.h"
 #include "esp_heap_caps.h"
+
+#if __has_include("esp_psram.h")
+#include "esp_psram.h"
+#define HAVE_ESP_PSRAM_H 1
+#else
+#define HAVE_ESP_PSRAM_H 0
+#endif
 
 #include "wifi_manager.h"
 #include "audio_pipeline.h"
@@ -43,7 +49,12 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // 2. Verify Octal PSRAM (8MB)
-    size_t psram_size = esp_psram_get_size();
+    size_t psram_size = 0;
+#if HAVE_ESP_PSRAM_H
+    psram_size = esp_psram_get_size();
+#else
+    psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+#endif
     ESP_LOGI(TAG, "Octal PSRAM Detected: %zu MB (%zu bytes)", psram_size / (1024 * 1024), psram_size);
     if (psram_size < 4 * 1024 * 1024) {
         ESP_LOGW(TAG, "Warning: Expected >= 8MB Octal PSRAM for high-res streaming ringbuffers!");
@@ -59,20 +70,20 @@ void app_main(void)
     // 5. Initialize Wi-Fi in Concurrent Mode (SoftAP open + STA home Wi-Fi)
     wifi_manager_init();
 
-    // 6. Start Web Server with REST API & AMOLED Web UI
-    web_server_start();
-
-    // 7. Start AirPlay 2 (RAOP) 24/7 background listener
+    // 6. Initialize AirPlay 2 / RAOP Audio Receiver
     airplay_server_start();
 
-    // 8. Start DLNA / UPnP MediaRenderer service
+    // 7. Initialize DLNA / UPnP MediaRenderer
     dlna_renderer_start();
 
-    // 9. Start Direct HTTP / Radio Streamer engine
+    // 8. Initialize Direct HTTP Web Radio & MP3 Streamer
     http_streamer_init();
 
-    // 10. Check and validate OTA boot status
+    // 9. Initialize Embedded Web Dashboard and REST API Server
+    web_server_start();
+
+    // 10. Verify Dual-Bank A/B OTA Partition State
     ota_engine_validate_boot();
 
-    ESP_LOGI(TAG, "All audio services initialized successfully. Ready for playback.");
+    ESP_LOGI(TAG, "Ready! Connect to Wi-Fi AP 'ESP32-Audio-Config' or http://esp32-audio.local");
 }

@@ -23,4 +23,9 @@ idf_component_register(
         mbedtls
         lwip
         esp_ringbuf
+        esp_psram
+        esp_timer
+        esp_system
+        heap
+        freertos
 )

@@ -275,6 +275,11 @@ storage,  data, spiffs,  0xd20000, 0x2e0000,
         mbedtls
         lwip
         esp_ringbuf
+        esp_psram
+        esp_timer
+        esp_system
+        heap
+        freertos
 )
 `
   },
@@ -298,8 +303,14 @@ storage,  data, spiffs,  0xd20000, 0x2e0000,
 #include "esp_system.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_psram.h"
 #include "esp_heap_caps.h"
+
+#if __has_include("esp_psram.h")
+#include "esp_psram.h"
+#define HAVE_ESP_PSRAM_H 1
+#else
+#define HAVE_ESP_PSRAM_H 0
+#endif
 
 #include "wifi_manager.h"
 #include "audio_pipeline.h"
@@ -328,7 +339,12 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // 2. Verify Octal PSRAM (8MB)
-    size_t psram_size = esp_psram_get_size();
+    size_t psram_size = 0;
+#if HAVE_ESP_PSRAM_H
+    psram_size = esp_psram_get_size();
+#else
+    psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+#endif
     ESP_LOGI(TAG, "Octal PSRAM Detected: %zu MB (%zu bytes)", psram_size / (1024 * 1024), psram_size);
     if (psram_size < 4 * 1024 * 1024) {
         ESP_LOGW(TAG, "Warning: Expected >= 8MB Octal PSRAM for high-res streaming ringbuffers!");
@@ -344,22 +360,22 @@ void app_main(void)
     // 5. Initialize Wi-Fi in Concurrent Mode (SoftAP open + STA home Wi-Fi)
     wifi_manager_init();
 
-    // 6. Start Web Server with REST API & AMOLED Web UI
-    web_server_start();
-
-    // 7. Start AirPlay 2 (RAOP) 24/7 background listener
+    // 6. Initialize AirPlay 2 / RAOP Audio Receiver
     airplay_server_start();
 
-    // 8. Start DLNA / UPnP MediaRenderer service
+    // 7. Initialize DLNA / UPnP MediaRenderer
     dlna_renderer_start();
 
-    // 9. Start Direct HTTP / Radio Streamer engine
+    // 8. Initialize Direct HTTP Web Radio & MP3 Streamer
     http_streamer_init();
 
-    // 10. Check and validate OTA boot status
+    // 9. Initialize Embedded Web Dashboard and REST API Server
+    web_server_start();
+
+    // 10. Verify Dual-Bank A/B OTA Partition State
     ota_engine_validate_boot();
 
-    ESP_LOGI(TAG, "All audio services initialized successfully. Ready for playback.");
+    ESP_LOGI(TAG, "Ready! Connect to Wi-Fi AP 'ESP32-Audio-Config' or http://esp32-audio.local");
 }
 `
   },
@@ -600,15 +616,29 @@ void wifi_manager_get_config(wifi_config_storage_t *config)
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 
-// Pin Configuration for UDA1334A DAC
-#define UDA1334A_I2S_PORT   I2S_NUM_0
-#define UDA1334A_BCLK_PIN   GPIO_NUM_14
-#define UDA1334A_WSEL_PIN   GPIO_NUM_15
-#define UDA1334A_DIN_PIN    GPIO_NUM_16
+// Audio Hardware Pinout (UDA1334A I2S DAC)
+#ifndef CONFIG_I2S_BCLK_PIN
+#define CONFIG_I2S_BCLK_PIN 14
+#endif
+
+#ifndef CONFIG_I2S_WSEL_PIN
+#define CONFIG_I2S_WSEL_PIN 15
+#endif
+
+#ifndef CONFIG_I2S_DIN_PIN
+#define CONFIG_I2S_DIN_PIN 16
+#endif
+
+#define UDA1334A_BCLK_PIN   CONFIG_I2S_BCLK_PIN
+#define UDA1334A_WSEL_PIN   CONFIG_I2S_WSEL_PIN
+#define UDA1334A_DIN_PIN    CONFIG_I2S_DIN_PIN
 
 // 8MB Octal PSRAM Ringbuffer (1024 KB allocated for anti-jitter network buffering)
+#ifndef AUDIO_RINGBUF_SIZE
 #define AUDIO_RINGBUF_SIZE  (1024 * 1024)
+#endif
 
 void audio_pipeline_init(void);
 esp_err_t audio_pipeline_set_sample_rate(uint32_t sample_rate, uint8_t bits_per_sample);
@@ -629,7 +659,6 @@ size_t audio_pipeline_get_buffered_bytes(void);
     content: `#include "audio_pipeline.h"
 #include <string.h>
 #include <stdlib.h>
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -648,6 +677,8 @@ size_t audio_pipeline_get_buffered_bytes(void);
 #else
 #define USE_ESP_IDF_V5_I2S 0
 #endif
+
+#include "driver/gpio.h"
 
 static const char *TAG = "AUDIO_PIPE";
 
@@ -700,7 +731,7 @@ static void audio_feeder_task(void *pvParameters)
                 i2s_channel_write(s_tx_chan, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
             }
 #elif defined(I2S_NUM_0)
-            i2s_write(UDA1334A_I2S_PORT, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
+            i2s_write(I2S_NUM_0, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
 #endif
         } else {
             // Buffer underrun / idle silence to prevent DAC popping
@@ -720,7 +751,7 @@ void audio_pipeline_init(void)
 
 #if USE_ESP_IDF_V5_I2S
     // Configure I2S Standard Philips Master Mode for UDA1334A using ESP-IDF v5 driver
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(UDA1334A_I2S_PORT, I2S_ROLE_MASTER);
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     chan_cfg.dma_desc_num = 6;
     chan_cfg.dma_frame_num = 512;
     esp_err_t err = i2s_new_channel(&chan_cfg, &s_tx_chan, NULL);
@@ -764,8 +795,8 @@ void audio_pipeline_init(void)
         .data_out_num = UDA1334A_DIN_PIN,
         .data_in_num = I2S_PIN_NO_CHANGE
     };
-    i2s_driver_install(UDA1334A_I2S_PORT, &i2s_config, 0, NULL);
-    i2s_set_pin(UDA1334A_I2S_PORT, &pin_config);
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM_0, &pin_config);
 #endif
 
     // Spawn high-priority audio feeder task pinned to Core 1
@@ -786,7 +817,7 @@ esp_err_t audio_pipeline_set_sample_rate(uint32_t sample_rate, uint8_t bits_per_
     }
     return ESP_OK;
 #elif defined(I2S_NUM_0)
-    return i2s_set_clk(UDA1334A_I2S_PORT, sample_rate, (i2s_bits_per_sample_t)bits_per_sample, I2S_CHANNEL_STEREO);
+    return i2s_set_clk(I2S_NUM_0, sample_rate, (i2s_bits_per_sample_t)bits_per_sample, I2S_CHANNEL_STEREO);
 #else
     return ESP_OK;
 #endif

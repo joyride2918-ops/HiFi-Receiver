@@ -4,15 +4,29 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 
-// Pin Configuration for UDA1334A DAC
-#define UDA1334A_I2S_PORT   I2S_NUM_0
-#define UDA1334A_BCLK_PIN   GPIO_NUM_14
-#define UDA1334A_WSEL_PIN   GPIO_NUM_15
-#define UDA1334A_DIN_PIN    GPIO_NUM_16
+// Audio Hardware Pinout (UDA1334A I2S DAC)
+#ifndef CONFIG_I2S_BCLK_PIN
+#define CONFIG_I2S_BCLK_PIN 14
+#endif
+
+#ifndef CONFIG_I2S_WSEL_PIN
+#define CONFIG_I2S_WSEL_PIN 15
+#endif
+
+#ifndef CONFIG_I2S_DIN_PIN
+#define CONFIG_I2S_DIN_PIN 16
+#endif
+
+#define UDA1334A_BCLK_PIN   CONFIG_I2S_BCLK_PIN
+#define UDA1334A_WSEL_PIN   CONFIG_I2S_WSEL_PIN
+#define UDA1334A_DIN_PIN    CONFIG_I2S_DIN_PIN
 
 // 8MB Octal PSRAM Ringbuffer (1024 KB allocated for anti-jitter network buffering)
+#ifndef AUDIO_RINGBUF_SIZE
 #define AUDIO_RINGBUF_SIZE  (1024 * 1024)
+#endif
 
 void audio_pipeline_init(void);
 esp_err_t audio_pipeline_set_sample_rate(uint32_t sample_rate, uint8_t bits_per_sample);

@@ -1,7 +1,6 @@
 #include "audio_pipeline.h"
 #include <string.h>
 #include <stdlib.h>
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +19,8 @@
 #else
 #define USE_ESP_IDF_V5_I2S 0
 #endif
+
+#include "driver/gpio.h"
 
 static const char *TAG = "AUDIO_PIPE";
 
@@ -72,7 +73,7 @@ static void audio_feeder_task(void *pvParameters)
                 i2s_channel_write(s_tx_chan, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
             }
 #elif defined(I2S_NUM_0)
-            i2s_write(UDA1334A_I2S_PORT, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
+            i2s_write(I2S_NUM_0, pcm_buffer, item_size, &bytes_written, portMAX_DELAY);
 #endif
         } else {
             // Buffer underrun / idle silence to prevent DAC popping
@@ -92,7 +93,7 @@ void audio_pipeline_init(void)
 
 #if USE_ESP_IDF_V5_I2S
     // Configure I2S Standard Philips Master Mode for UDA1334A using ESP-IDF v5 driver
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(UDA1334A_I2S_PORT, I2S_ROLE_MASTER);
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     chan_cfg.dma_desc_num = 6;
     chan_cfg.dma_frame_num = 512;
     esp_err_t err = i2s_new_channel(&chan_cfg, &s_tx_chan, NULL);
@@ -136,8 +137,8 @@ void audio_pipeline_init(void)
         .data_out_num = UDA1334A_DIN_PIN,
         .data_in_num = I2S_PIN_NO_CHANGE
     };
-    i2s_driver_install(UDA1334A_I2S_PORT, &i2s_config, 0, NULL);
-    i2s_set_pin(UDA1334A_I2S_PORT, &pin_config);
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM_0, &pin_config);
 #endif
 
     // Spawn high-priority audio feeder task pinned to Core 1
@@ -158,7 +159,7 @@ esp_err_t audio_pipeline_set_sample_rate(uint32_t sample_rate, uint8_t bits_per_
     }
     return ESP_OK;
 #elif defined(I2S_NUM_0)
-    return i2s_set_clk(UDA1334A_I2S_PORT, sample_rate, (i2s_bits_per_sample_t)bits_per_sample, I2S_CHANNEL_STEREO);
+    return i2s_set_clk(I2S_NUM_0, sample_rate, (i2s_bits_per_sample_t)bits_per_sample, I2S_CHANNEL_STEREO);
 #else
     return ESP_OK;
 #endif
