@@ -114,6 +114,7 @@ board = esp32-s3-devkitc-1
 board_build.flash_mode = qio
 board_build.f_flash = 80000000L
 board_build.flash_size = 16MB
+board_upload.flash_size = 16MB
 board_build.partitions = partitions.csv
 
 ; 8MB Octal PSRAM (OPI) Configuration
@@ -185,12 +186,13 @@ project(esp32s3_wifi_music)
     name: 'sdkconfig.defaults',
     type: 'file',
     language: 'ini',
-    content: `# ESP32-S3 N16R8 Target Configuration
+    content: `# ESP32-S3 Target Configuration
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_IDF_TARGET_ESP32S3=y
 
-# 16MB Flash Configuration
+# Flash Configuration
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
@@ -235,14 +237,14 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
     name: 'partitions.csv',
     type: 'file',
     language: 'csv',
-    content: `# ESP32-S3 N16R8 (16MB Flash) High-Fidelity Audio Partition Table
+    content: `# ESP32-S3 High-Fidelity Audio Partition Table (Compatible with 8MB and 16MB Flash)
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 otadata,  data, ota,     0xf000,   0x2000,
 phy_init, data, phy,     0x11000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x680000,
-ota_1,    app,  ota_1,   0x6a0000, 0x680000,
-storage,  data, spiffs,  0xd20000, 0x2e0000,
+ota_0,    app,  ota_0,   0x20000,  0x360000,
+ota_1,    app,  ota_1,   0x380000, 0x360000,
+storage,  data, spiffs,  0x6e0000, 0x100000,
 `
   },
   {
@@ -1377,6 +1379,8 @@ const char* ota_engine_get_running_partition_name(void);
     type: 'file',
     language: 'c',
     content: `#include "ota_engine.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
