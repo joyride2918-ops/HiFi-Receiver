@@ -79,8 +79,13 @@ def main():
         except Exception as e:
             print(f"  Mirror warning:  {e}")
 
-    cmd = [
-        "esptool.py", "--chip", "esp32s3", "merge_bin",
+    import shutil
+    esptool_cmd = [shutil.which("esptool.py") or shutil.which("esptool") or sys.executable]
+    if esptool_cmd[0] == sys.executable:
+        esptool_cmd.extend(["-m", "esptool"])
+
+    cmd = esptool_cmd + [
+        "--chip", "esp32s3", "merge_bin",
         "-o", output,
         "--flash_mode", "dio",
         "--flash_freq", "80m",

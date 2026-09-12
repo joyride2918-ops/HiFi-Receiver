@@ -266,6 +266,7 @@ storage,  data, spiffs,  0x6e0000, 0x100000,
     INCLUDE_DIRS
         "."
     REQUIRES
+        mdns
         esp_wifi
         esp_event
         nvs_flash
@@ -285,6 +286,7 @@ storage,  data, spiffs,  0x6e0000, 0x100000,
         freertos
         json
     PRIV_REQUIRES
+        mdns
         json
         esp_psram
         esp_event
@@ -1856,8 +1858,13 @@ def main():
         except Exception as e:
             print(f"  Mirror warning:  {e}")
 
-    cmd = [
-        "esptool.py", "--chip", "esp32s3", "merge_bin",
+    import shutil
+    esptool_cmd = [shutil.which("esptool.py") or shutil.which("esptool") or sys.executable]
+    if esptool_cmd[0] == sys.executable:
+        esptool_cmd.extend(["-m", "esptool"])
+
+    cmd = esptool_cmd + [
+        "--chip", "esp32s3", "merge_bin",
         "-o", output,
         "--flash_mode", "dio",
         "--flash_freq", "80m",
@@ -1896,6 +1903,7 @@ if __name__ == "__main__":
 # PlatformIO Post-Build Hook: Generates monolithic merged.bin (0x0 Flash Image)
 # ==============================================================================
 import os
+import sys
 
 def post_build_action(source, target, env):
     build_dir = env.subst("\$BUILD_DIR")
@@ -1904,11 +1912,15 @@ def post_build_action(source, target, env):
     app = os.path.join(build_dir, "firmware.bin")
     merged = os.path.join(build_dir, "merged.bin")
 
+    if not os.path.isfile(bootloader) or not os.path.isfile(partitions) or not os.path.isfile(app):
+        print(f"\n[PlatformIO Hook] ⚠️ Skipping merge_bin: Required build artifacts not all found yet.")
+        return
+
     print("\n[PlatformIO Hook] Merging binaries into monolithic merged.bin...")
     cmd = (
-        f"esptool.py --chip esp32s3 merge_bin -o {merged} "
-        f"--flash_mode dio --flash_freq 80m --flash_size keep "
-        f"0x0 {bootloader} 0x8000 {partitions} 0x20000 {app}"
+        f'"{sys.executable}" -m esptool --chip esp32s3 merge_bin -o "{merged}" '
+        f'--flash_mode dio --flash_freq 80m --flash_size keep '
+        f'0x0 "{bootloader}" 0x8000 "{partitions}" 0x20000 "{app}"'
     )
     res = os.system(cmd)
     if res == 0:

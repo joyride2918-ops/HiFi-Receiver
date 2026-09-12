@@ -12,6 +12,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        mdns
         esp_wifi
         esp_event
         nvs_flash
@@ -31,6 +32,7 @@ idf_component_register(
         freertos
         json
     PRIV_REQUIRES
+        mdns
         json
         esp_psram
         esp_event
