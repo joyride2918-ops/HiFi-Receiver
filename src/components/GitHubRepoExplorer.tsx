@@ -82,6 +82,7 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
 
   // Group files into categories
   const rootFiles = files.filter((f) => !f.path.includes('/'));
+  const githubWorkflowFiles = files.filter((f) => f.path.startsWith('.github/'));
   const mainFiles = files.filter((f) => f.path.startsWith('main/'));
   const scriptFiles = files.filter((f) => f.path.startsWith('scripts/'));
   const buildFiles = files.filter((f) => f.path.startsWith('build/'));
@@ -105,7 +106,44 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
         </div>
 
         {/* Action Buttons: Star, Fork, Download ZIP */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+          {/* Quick-Jump Presets */}
+          <div className="hidden sm:flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 p-1 rounded-lg text-[11px] font-mono">
+            <button
+              id="btn-quick-build-yml"
+              onClick={() => setSelectedFilePath('.github/workflows/build.yml')}
+              className={`px-2 py-0.5 rounded transition ${
+                selectedFilePath === '.github/workflows/build.yml'
+                  ? 'bg-purple-600 text-white font-bold'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              build.yml
+            </button>
+            <button
+              id="btn-quick-platformio-ini"
+              onClick={() => setSelectedFilePath('platformio.ini')}
+              className={`px-2 py-0.5 rounded transition ${
+                selectedFilePath === 'platformio.ini'
+                  ? 'bg-amber-600 text-white font-bold'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              platformio.ini
+            </button>
+            <button
+              id="btn-quick-main-c"
+              onClick={() => setSelectedFilePath('main/main.c')}
+              className={`px-2 py-0.5 rounded transition ${
+                selectedFilePath === 'main/main.c'
+                  ? 'bg-cyan-600 text-white font-bold'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              main.c
+            </button>
+          </div>
+
           <div className="flex items-center rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300 overflow-hidden">
             <div className="px-2.5 py-1.5 flex items-center gap-1.5 border-r border-zinc-800">
               <GitBranch className="w-3.5 h-3.5 text-zinc-400" />
@@ -150,7 +188,7 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
 
           <div className="flex-1 overflow-y-auto space-y-1 pr-1">
             {/* Root Files */}
-            <div className="text-[10px] font-mono text-zinc-500 px-2 py-1 uppercase">Root & Flash Scripts</div>
+            <div className="text-[10px] font-mono text-zinc-500 px-2 py-1 uppercase">Root & Config</div>
             {rootFiles.map((file) => (
               <button
                 key={file.path}
@@ -167,6 +205,32 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
                 </div>
               </button>
             ))}
+
+            {/* .github/ Workflows Directory */}
+            {githubWorkflowFiles.length > 0 && (
+              <>
+                <div className="text-[10px] font-mono text-purple-400/80 px-2 pt-2.5 pb-1 uppercase flex items-center gap-1">
+                  <Folder className="w-3 h-3 text-purple-400" />
+                  .github/ (CI/CD Workflows)
+                </div>
+                {githubWorkflowFiles.map((file) => (
+                  <button
+                    key={file.path}
+                    onClick={() => setSelectedFilePath(file.path)}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 pl-5 rounded-lg text-left text-xs font-mono transition ${
+                      selectedFilePath === file.path
+                        ? 'bg-purple-950/60 border border-purple-800/60 text-purple-200'
+                        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <FileCode className="w-3.5 h-3.5 text-purple-400/80 flex-shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
 
             {/* main/ Directory */}
             <div className="text-[10px] font-mono text-cyan-400/80 px-2 pt-2.5 pb-1 uppercase flex items-center gap-1">

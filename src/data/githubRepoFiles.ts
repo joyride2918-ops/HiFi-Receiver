@@ -46,19 +46,31 @@ A production-grade, 24/7 high-fidelity network audio receiver and DSP preamplifi
 - Target: \`esp32s3\`
 
 \`\`\`bash
-# 1. Clone repository
+# 1. Clone repository from GitHub
 git clone https://github.com/esp32-audio/esp32s3-wifi-music-uda1334a.git
 cd esp32s3-wifi-music-uda1334a
 
-# 2. Set target to ESP32-S3
+# Option A: ESP-IDF CLI Build
 idf.py set-target esp32s3
-
-# 3. Build the project
 idf.py build
-
-# 4. Flash and monitor (replace /dev/ttyUSB0 with your port)
 idf.py -p /dev/ttyUSB0 flash monitor
+
+# Option B: PlatformIO Build & Flash (using platformio.ini)
+pio run -e esp32s3_espidf -t upload --upload-port /dev/ttyUSB0
+pio device monitor -b 115200
+
+# Option C: 1-Step Monolithic Flash (merged.bin at 0x0)
+esptool.py --chip esp32s3 -p /dev/ttyUSB0 -b 921600 write_flash 0x0 build/merged.bin
 \`\`\`
+
+---
+
+## GitHub Actions CI/CD (.github/workflows/build.yml)
+
+Every push to your GitHub repo triggers automated compilation:
+- Automated building on both ESP-IDF v5.2 and PlatformIO.
+- Automated creation of \`build/merged.bin\` via \`merge_bin.py\`.
+- Direct release asset publishing so you can download \`merged.bin\` right from GitHub releases.
 
 ---
 
@@ -1704,6 +1716,104 @@ env.AddPostAction("$BUILD_DIR/\${PROGNAME}.bin", post_build_action)
 0x8000 partition_table/partition-table.bin
 0xf000 ota_data_initial.bin
 0x20000 esp32s3_audio.bin
+`
+  },
+  {
+    path: '.github/workflows/build.yml',
+    name: 'build.yml',
+    type: 'file',
+    language: 'yaml',
+    content: `name: ESP32-S3 Firmware Build & Release
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-esp-idf:
+    name: Build ESP-IDF & Generate merged.bin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install esptool
+        run: pip install esptool
+
+      - name: Build ESP-IDF Firmware in Container
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.2.1
+          target: esp32s3
+          path: '.'
+
+      - name: Generate Monolithic merged.bin (0x0 Flash Image)
+        run: |
+          python scripts/merge_bin.py
+
+      - name: Upload Build Artifacts (including merged.bin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-firmware-binaries
+          path: |
+            build/merged.bin
+            build/esp32s3_audio.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            flash.sh
+            flash.bat
+
+  build-platformio:
+    name: Build PlatformIO Target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio esptool
+
+      - name: PlatformIO Build
+        run: pio run -e esp32s3_espidf
+`
+  },
+  {
+    path: '.gitignore',
+    name: '.gitignore',
+    type: 'file',
+    language: 'text',
+    content: `# ESP-IDF build output
+build/
+sdkconfig
+sdkconfig.old
+
+# PlatformIO output
+.pio/
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
 `
   }
 ];
