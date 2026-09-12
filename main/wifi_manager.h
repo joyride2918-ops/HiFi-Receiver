@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "esp_netif.h"
 
 #define DEFAULT_AP_SSID      "ESP32-Audio-Config"
 #define DEFAULT_AP_PASSWORD  ""          // Open by default for easy setup
@@ -27,5 +28,6 @@ bool wifi_manager_is_sta_connected(void);
 void wifi_manager_get_sta_ip(char *ip_str, size_t max_len);
 int8_t wifi_manager_get_sta_rssi(void);
 void wifi_manager_get_config(wifi_config_storage_t *config);
+esp_netif_t* wifi_manager_get_sta_netif(void);
 
 #endif // WIFI_MANAGER_H

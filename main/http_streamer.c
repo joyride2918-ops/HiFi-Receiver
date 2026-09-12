@@ -1,10 +1,16 @@
 #include "http_streamer.h"
 #include <string.h>
+#include <stdlib.h>
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "audio_pipeline.h"
+
+#define MINIMP3_IMPLEMENTATION
+#define MINIMP3_ONLY_MP3
+#define MINIMP3_NO_SIMD
+#include "minimp3.h"
 
 static const char *TAG = "HTTP_STREAM";
 static bool s_playing = false;
@@ -33,25 +39,86 @@ static void stream_worker_task(void *pvParameters)
         s_playing = true;
         ESP_LOGI(TAG, "Streaming audio from: %s", url);
 
-        char buffer[2048];
+        mp3dec_t mp3d;
+        mp3dec_init(&mp3d);
+        mp3dec_frame_info_t info;
+
+        const size_t inbuf_cap = 4096;
+        uint8_t *inbuf = (uint8_t *)malloc(inbuf_cap);
+        short *pcm = (short *)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(short));
+        short *stereo_pcm = (short *)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(short));
+
+        if (!inbuf || !pcm || !stereo_pcm) {
+            ESP_LOGE(TAG, "Failed to allocate MP3 decoder buffers");
+            if (inbuf) free(inbuf);
+            if (pcm) free(pcm);
+            if (stereo_pcm) free(stereo_pcm);
+            esp_http_client_cleanup(client);
+            s_playing = false;
+            s_stream_task_handle = NULL;
+            vTaskDelete(NULL);
+            return;
+        }
+
+        int inbuf_bytes = 0;
+
         while (s_playing) {
             if (s_paused) {
                 vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
             }
 
-            int read_bytes = esp_http_client_read(client, buffer, sizeof(buffer));
-            if (read_bytes > 0) {
-                // Feeds into 1MB PSRAM ringbuffer connected to UDA1334A DAC
-                audio_pipeline_write((const uint8_t *)buffer, read_bytes, pdMS_TO_TICKS(100));
-            } else if (read_bytes == 0) {
-                ESP_LOGI(TAG, "Stream reached EOF.");
-                break;
+            // Fill input buffer from HTTP stream if we have room
+            if (inbuf_bytes < 2048) {
+                int to_read = inbuf_cap - inbuf_bytes;
+                int read_bytes = esp_http_client_read(client, (char *)inbuf + inbuf_bytes, to_read);
+                if (read_bytes > 0) {
+                    inbuf_bytes += read_bytes;
+                } else if (read_bytes < 0) {
+                    ESP_LOGW(TAG, "Stream read error or timeout.");
+                    break;
+                }
+            }
+
+            if (inbuf_bytes == 0) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+
+            // Decode MP3 frame to PCM
+            int samples = mp3dec_decode_frame(&mp3d, inbuf, inbuf_bytes, pcm, &info);
+            if (info.frame_bytes > 0) {
+                if (samples > 0) {
+                    if (info.hz > 0 && info.hz != 44100) {
+                        audio_pipeline_set_sample_rate(info.hz, 16);
+                    }
+
+                    if (info.channels == 2) {
+                        audio_pipeline_write((const uint8_t *)pcm, samples * 2 * sizeof(short), pdMS_TO_TICKS(100));
+                    } else if (info.channels == 1) {
+                        for (int i = 0; i < samples; i++) {
+                            stereo_pcm[i * 2] = pcm[i];
+                            stereo_pcm[i * 2 + 1] = pcm[i];
+                        }
+                        audio_pipeline_write((const uint8_t *)stereo_pcm, samples * 2 * sizeof(short), pdMS_TO_TICKS(100));
+                    }
+                }
+                inbuf_bytes -= info.frame_bytes;
+                if (inbuf_bytes > 0) {
+                    memmove(inbuf, inbuf + info.frame_bytes, inbuf_bytes);
+                }
             } else {
-                ESP_LOGW(TAG, "Stream read error or timeout.");
-                break;
+                // If not enough data for full frame, read more. If full buffer and no frame, drop 1 byte to re-sync
+                if (inbuf_bytes >= inbuf_cap) {
+                    inbuf_bytes--;
+                    memmove(inbuf, inbuf + 1, inbuf_bytes);
+                }
             }
         }
+
+        free(inbuf);
+        free(pcm);
+        free(stereo_pcm);
     } else {
         ESP_LOGE(TAG, "Failed to connect to stream URL: %s (err: %s)", url, esp_err_to_name(err));
     }

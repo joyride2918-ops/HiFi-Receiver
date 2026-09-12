@@ -101,14 +101,24 @@ static const char INDEX_HTML[] =
   "<div style=\"margin-top:16px;padding-top:14px;border-top:1px solid #27272a\">"
     "<div style=\"font-size:12px;font-weight:700;color:#a1a1aa;text-transform:uppercase;margin-bottom:8px\">Audio Stream Player</div>"
     "<input type=\"text\" id=\"stream-url\" placeholder=\"http://stream.radioparadise.com/mellow-128\">"
+    "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px\">"
+      "<button type=\"button\" class=\"btn\" style=\"margin-top:0;padding:8px;font-size:11px;background:#27272a;color:#22d3ee;border:1px solid #3f3f46\" onclick=\"setPreset('http://stream.radioparadise.com/mellow-128')\">Radio Paradise</button>"
+      "<button type=\"button\" class=\"btn\" style=\"margin-top:0;padding:8px;font-size:11px;background:#27272a;color:#22d3ee;border:1px solid #3f3f46\" onclick=\"setPreset('http://ice2.somafm.com/groovesalad-128-mp3')\">Groove Salad</button>"
+      "<button type=\"button\" class=\"btn\" style=\"margin-top:0;padding:8px;font-size:11px;background:#27272a;color:#22d3ee;border:1px solid #3f3f46\" onclick=\"setPreset('http://stream.radioparadise.com/rock-128')\">RP Rock</button>"
+      "<button type=\"button\" class=\"btn\" style=\"margin-top:0;padding:8px;font-size:11px;background:#27272a;color:#22d3ee;border:1px solid #3f3f46\" onclick=\"setPreset('http://ice1.somafm.com/dronezone-128-mp3')\">Drone Zone</button>"
+    "</div>"
     "<div style=\"display:flex;gap:6px;margin-top:8px\">"
-      "<button class=\"btn\" onclick=\"playStream()\" style=\"margin-top:0;flex:2\">Play URL</button>"
-      "<button class=\"btn\" onclick=\"stopStream()\" style=\"margin-top:0;flex:1;background:#27272a;color:#fff\">Stop</button>"
+      "<button type=\"button\" class=\"btn\" onclick=\"playStream()\" style=\"margin-top:0;flex:2\">Play Stream</button>"
+      "<button type=\"button\" class=\"btn\" onclick=\"stopStream()\" style=\"margin-top:0;flex:1;background:#27272a;color:#fff\">Stop</button>"
     "</div>"
   "</div>"
 "</div>"
 "<script>"
 "let eqTimer;"
+"function setPreset(url) {"
+  "document.getElementById('stream-url').value = url;"
+  "playStream();"
+"}"
 "async function pollStatus() {"
   "try {"
     "const res = await fetch('/api/status');"
@@ -186,8 +196,11 @@ static const char INDEX_HTML[] =
   "}, 150);"
 "}"
 "async function playStream() {"
-  "const url = document.getElementById('stream-url').value.trim();"
-  "if (!url) return;"
+  "let url = document.getElementById('stream-url').value.trim();"
+  "if (!url) {"
+    "url = 'http://stream.radioparadise.com/mellow-128';"
+    "document.getElementById('stream-url').value = url;"
+  "}"
   "await fetch('/api/stream', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url}) });"
   "setTimeout(pollStatus, 1000);"
 "}"
@@ -403,6 +416,20 @@ static esp_err_t upnp_description_handler(httpd_req_t *req)
         "        <eventSubURL>/upnp/event/AVTransport</eventSubURL>\r\n"
         "        <SCPDURL>/avtransport.xml</SCPDURL>\r\n"
         "      </service>\r\n"
+        "      <service>\r\n"
+        "        <serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType>\r\n"
+        "        <serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId>\r\n"
+        "        <controlURL>/upnp/control/RenderingControl</controlURL>\r\n"
+        "        <eventSubURL>/upnp/event/RenderingControl</eventSubURL>\r\n"
+        "        <SCPDURL>/renderingcontrol.xml</SCPDURL>\r\n"
+        "      </service>\r\n"
+        "      <service>\r\n"
+        "        <serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>\r\n"
+        "        <serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId>\r\n"
+        "        <controlURL>/upnp/control/ConnectionManager</controlURL>\r\n"
+        "        <eventSubURL>/upnp/event/ConnectionManager</eventSubURL>\r\n"
+        "        <SCPDURL>/connectionmanager.xml</SCPDURL>\r\n"
+        "      </service>\r\n"
         "    </serviceList>\r\n"
         "  </device>\r\n"
         "</root>\r\n";
@@ -412,10 +439,122 @@ static esp_err_t upnp_description_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t upnp_scpd_avt_handler(httpd_req_t *req)
+{
+    const char *xml = 
+        "<?xml version=\"1.0\"?>\r\n"
+        "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
+        "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
+        "  <actionList>\r\n"
+        "    <action><name>SetAVTransportURI</name></action>\r\n"
+        "    <action><name>Play</name></action>\r\n"
+        "    <action><name>Pause</name></action>\r\n"
+        "    <action><name>Stop</name></action>\r\n"
+        "    <action><name>GetTransportInfo</name></action>\r\n"
+        "    <action><name>GetPositionInfo</name></action>\r\n"
+        "  </actionList>\r\n"
+        "</scpd>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, xml, strlen(xml));
+    return ESP_OK;
+}
+
+static esp_err_t upnp_scpd_rc_handler(httpd_req_t *req)
+{
+    const char *xml = 
+        "<?xml version=\"1.0\"?>\r\n"
+        "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
+        "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
+        "  <actionList>\r\n"
+        "    <action><name>SetVolume</name></action>\r\n"
+        "    <action><name>GetVolume</name></action>\r\n"
+        "    <action><name>SetMute</name></action>\r\n"
+        "    <action><name>GetMute</name></action>\r\n"
+        "  </actionList>\r\n"
+        "</scpd>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, xml, strlen(xml));
+    return ESP_OK;
+}
+
+static esp_err_t upnp_scpd_cm_handler(httpd_req_t *req)
+{
+    const char *xml = 
+        "<?xml version=\"1.0\"?>\r\n"
+        "<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">\r\n"
+        "  <specVersion><major>1</major><minor>0</minor></specVersion>\r\n"
+        "  <actionList>\r\n"
+        "    <action><name>GetProtocolInfo</name></action>\r\n"
+        "    <action><name>GetCurrentConnectionIDs</name></action>\r\n"
+        "  </actionList>\r\n"
+        "</scpd>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, xml, strlen(xml));
+    return ESP_OK;
+}
+
+static esp_err_t upnp_renderingcontrol_handler(httpd_req_t *req)
+{
+    char buf[1024];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char soap_resp[512] = "";
+    if (ret > 0) {
+        buf[ret] = '\0';
+        if (strstr(buf, "SetVolume")) {
+            char *vol_start = strstr(buf, "<DesiredVolume>");
+            if (vol_start) {
+                int vol = atoi(vol_start + 15);
+                if (vol >= 0 && vol <= 100) {
+                    audio_pipeline_set_volume((uint8_t)vol);
+                }
+            }
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:SetVolumeResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
+        } else if (strstr(buf, "GetVolume")) {
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:GetVolumeResponse xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\"><CurrentVolume>%d</CurrentVolume></u:GetVolumeResponse></s:Body>\r\n"
+                "</s:Envelope>\r\n", audio_pipeline_get_volume());
+        } else {
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:Response xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
+        }
+    }
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, soap_resp, strlen(soap_resp));
+    return ESP_OK;
+}
+
+static esp_err_t upnp_connectionmanager_handler(httpd_req_t *req)
+{
+    const char *soap_resp = 
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+        "  <s:Body>\r\n"
+        "    <u:GetProtocolInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:ConnectionManager:1\">\r\n"
+        "      <Source></Source>\r\n"
+        "      <Sink>http-get:*:audio/mpeg:*,http-get:*:audio/wav:*,http-get:*:audio/flac:*,http-get:*:audio/aac:*</Sink>\r\n"
+        "    </u:GetProtocolInfoResponse>\r\n"
+        "  </s:Body>\r\n"
+        "</s:Envelope>\r\n";
+    httpd_resp_set_type(req, "text/xml");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, soap_resp, strlen(soap_resp));
+    return ESP_OK;
+}
+
 static esp_err_t upnp_avtransport_handler(httpd_req_t *req)
 {
     char buf[1024];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char soap_resp[512] = "";
     if (ret > 0) {
         buf[ret] = '\0';
         if (strstr(buf, "SetAVTransportURI")) {
@@ -430,21 +569,41 @@ static esp_err_t upnp_avtransport_handler(httpd_req_t *req)
                     http_streamer_play(uri);
                 }
             }
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:SetAVTransportURIResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
         } else if (strstr(buf, "<u:Play") || strstr(buf, "Play")) {
             http_streamer_resume();
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:PlayResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
         } else if (strstr(buf, "<u:Pause") || strstr(buf, "Pause")) {
             http_streamer_pause();
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:PauseResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
         } else if (strstr(buf, "<u:Stop") || strstr(buf, "Stop")) {
             http_streamer_stop();
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:StopResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
+        } else if (strstr(buf, "GetTransportInfo")) {
+            const char *state = http_streamer_is_playing() ? "PLAYING" : "STOPPED";
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:GetTransportInfoResponse xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"><CurrentTransportState>%s</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed></u:GetTransportInfoResponse></s:Body>\r\n"
+                "</s:Envelope>\r\n", state);
+        } else {
+            snprintf(soap_resp, sizeof(soap_resp),
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                "  <s:Body><u:Response xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/></s:Body>\r\n"
+                "</s:Envelope>\r\n");
         }
     }
-
-    const char *soap_resp = 
-        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
-        "  <s:Body>\r\n"
-        "    <u:Response xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"/>\r\n"
-        "  </s:Body>\r\n"
-        "</s:Envelope>\r\n";
     httpd_resp_set_type(req, "text/xml");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_send(req, soap_resp, strlen(soap_resp));
@@ -468,8 +627,13 @@ esp_err_t web_server_start(void)
         httpd_uri_t uri_win      = { .uri = "/connecttest.txt",     .method = HTTP_GET,  .handler = captive_portal_redirect_handler };
 
         // DLNA / UPnP MediaRenderer Endpoints
-        httpd_uri_t uri_desc     = { .uri = "/description.xml",           .method = HTTP_GET,  .handler = upnp_description_handler };
-        httpd_uri_t uri_avt      = { .uri = "/upnp/control/AVTransport",  .method = HTTP_POST, .handler = upnp_avtransport_handler };
+        httpd_uri_t uri_desc     = { .uri = "/description.xml",                 .method = HTTP_GET,  .handler = upnp_description_handler };
+        httpd_uri_t uri_scpd_avt = { .uri = "/avtransport.xml",                 .method = HTTP_GET,  .handler = upnp_scpd_avt_handler };
+        httpd_uri_t uri_scpd_rc  = { .uri = "/renderingcontrol.xml",            .method = HTTP_GET,  .handler = upnp_scpd_rc_handler };
+        httpd_uri_t uri_scpd_cm  = { .uri = "/connectionmanager.xml",           .method = HTTP_GET,  .handler = upnp_scpd_cm_handler };
+        httpd_uri_t uri_avt      = { .uri = "/upnp/control/AVTransport",        .method = HTTP_POST, .handler = upnp_avtransport_handler };
+        httpd_uri_t uri_rc       = { .uri = "/upnp/control/RenderingControl",    .method = HTTP_POST, .handler = upnp_renderingcontrol_handler };
+        httpd_uri_t uri_cm       = { .uri = "/upnp/control/ConnectionManager",   .method = HTTP_POST, .handler = upnp_connectionmanager_handler };
 
         // REST API Endpoints
         httpd_uri_t uri_status   = { .uri = "/api/status",          .method = HTTP_GET,  .handler = api_status_handler };
@@ -488,7 +652,12 @@ esp_err_t web_server_start(void)
         httpd_register_uri_handler(s_server, &uri_win);
 
         httpd_register_uri_handler(s_server, &uri_desc);
+        httpd_register_uri_handler(s_server, &uri_scpd_avt);
+        httpd_register_uri_handler(s_server, &uri_scpd_rc);
+        httpd_register_uri_handler(s_server, &uri_scpd_cm);
         httpd_register_uri_handler(s_server, &uri_avt);
+        httpd_register_uri_handler(s_server, &uri_rc);
+        httpd_register_uri_handler(s_server, &uri_cm);
 
         httpd_register_uri_handler(s_server, &uri_status);
         httpd_register_uri_handler(s_server, &uri_vol);

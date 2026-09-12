@@ -25,6 +25,16 @@ import { CURATED_TRACKS } from './data/radiosAndTrials';
 import { GITHUB_REPO_FILES } from './data/githubRepoFiles';
 import { audioEngine } from './services/audioEngine';
 import { 
+  fetchEspStatus, 
+  sendEspVolume, 
+  sendEspEq, 
+  sendEspPlayStream, 
+  sendEspStopStream, 
+  sendEspWifiConfig,
+  getStoredDeviceIp,
+  saveDeviceIp
+} from './services/esp32Api';
+import { 
   loadSavedVolume, 
   saveVolume, 
   loadSavedMuted, 
@@ -88,6 +98,12 @@ export default function App() {
 
   // OTA Firmware State
   const [otaState, setOtaState] = useState<OTAState>(loadSavedOta);
+
+  // ESP32 Hardware Connection State
+  const [deviceIp, setDeviceIp] = useState<string>(() => getStoredDeviceIp());
+  const [isHardwareOnline, setIsHardwareOnline] = useState<boolean>(false);
+  const [isEditingIp, setIsEditingIp] = useState<boolean>(false);
+  const [ipInput, setIpInput] = useState<string>(() => getStoredDeviceIp());
 
   // Live Services Telemetry State
   const [services, setServices] = useState<LiveServicesState>({
@@ -181,11 +197,60 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize EQ changes to WebAudio and localStorage
+  // Real-Time ESP32 Hardware Status Polling Loop
+  useEffect(() => {
+    let isMounted = true;
+    const poll = async () => {
+      try {
+        const status = await fetchEspStatus(deviceIp);
+        if (!isMounted) return;
+        setIsHardwareOnline(true);
+        setServices((prev) => ({
+          ...prev,
+          airplay2: {
+            ...prev.airplay2,
+            activeStreaming: status.airplay_active
+          },
+          dlna: {
+            ...prev.dlna,
+            activeStreaming: status.dlna_active
+          },
+          httpStream: {
+            ...prev.httpStream,
+            active: status.http_playing,
+            url: status.stream_url || prev.httpStream.url
+          },
+          wifi: {
+            ...prev.wifi,
+            staConnected: status.sta_connected,
+            staIp: status.sta_ip,
+            staRssi: status.sta_rssi
+          },
+          hardware: {
+            ...prev.hardware,
+            heapFreeKb: Math.round(status.free_heap / 1024),
+            psramFreeKb: Math.round(status.free_psram / 1024)
+          }
+        }));
+      } catch {
+        if (isMounted) setIsHardwareOnline(false);
+      }
+    };
+
+    poll();
+    const intervalId = setInterval(poll, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [deviceIp]);
+
+  // Synchronize EQ changes to WebAudio, ESP32 Hardware, and localStorage
   const handleEqChange = (newEq: DspEqState) => {
     setDspEq(newEq);
     saveEq(newEq);
     audioEngine.setEq(newEq);
+    sendEspEq(deviceIp, newEq.bass, newEq.mid, newEq.treble).catch(() => {});
   };
 
   const handleSelectPreset = (preset: EqPreset) => {
@@ -210,6 +275,7 @@ export default function App() {
         await audioEngine.playSyntheticTone(track.freq);
       } else {
         await audioEngine.playUrl(track.url);
+        sendEspPlayStream(deviceIp, track.url).catch(() => {});
       }
       setIsPlaying(true);
       setIsPaused(false);
@@ -234,6 +300,7 @@ export default function App() {
   const handlePlayPause = async () => {
     if (isPlaying) {
       audioEngine.pause();
+      sendEspStopStream(deviceIp).catch(() => {});
       setIsPlaying(false);
       setIsPaused(true);
       setServices((prev) => ({
@@ -249,6 +316,7 @@ export default function App() {
 
   const handleStop = () => {
     audioEngine.stop();
+    sendEspStopStream(deviceIp).catch(() => {});
     setIsPlaying(false);
     setIsPaused(false);
     setServices((prev) => ({
@@ -277,6 +345,7 @@ export default function App() {
     setVolume(val);
     saveVolume(val);
     audioEngine.setVolume(val);
+    sendEspVolume(deviceIp, val * 100).catch(() => {});
     if (isMuted && val > 0) {
       setIsMuted(false);
       saveMuted(false);
@@ -289,6 +358,7 @@ export default function App() {
     setIsMuted(nextMuted);
     saveMuted(nextMuted);
     audioEngine.setMute(nextMuted);
+    sendEspVolume(deviceIp, nextMuted ? 0 : volume * 100).catch(() => {});
   };
 
   const handlePlayCustomUrl = (url: string) => {
@@ -315,6 +385,7 @@ export default function App() {
     saveWiFi(cfg);
     localStorage.setItem('hifi_wifi_configured', 'true');
     setShowStartupWifiBanner(false);
+    sendEspWifiConfig(deviceIp, cfg.staSsid, cfg.staPassword).catch(() => {});
     setServices((prev) => ({
       ...prev,
       wifi: {
@@ -465,6 +536,93 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Hardware Link Status Bar (Target ESP32 IP & Live Sync Status) */}
+        <div className="bg-[#08080a] border border-zinc-800/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <span className={`w-2.5 h-2.5 rounded-full ${isHardwareOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className="font-medium text-zinc-300">
+              {isHardwareOnline ? (
+                <span>
+                  <strong className="text-white">ESP32-S3 Online:</strong> Synced with hardware at{' '}
+                  <span className="font-mono text-cyan-300">{deviceIp || 'direct host'}</span>
+                </span>
+              ) : (
+                <span>
+                  <strong className="text-zinc-200">Hardware Standby:</strong> Target ESP32 IP{' '}
+                  <span className="font-mono text-zinc-400">{deviceIp || 'direct host'}</span>
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isEditingIp ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={ipInput}
+                  onChange={(e) => setIpInput(e.target.value)}
+                  placeholder="e.g. http://192.168.254.112"
+                  className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 w-48"
+                />
+                <button
+                  onClick={() => {
+                    const clean = ipInput.trim();
+                    setDeviceIp(clean);
+                    saveDeviceIp(clean);
+                    setIsEditingIp(false);
+                  }}
+                  className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-lg text-xs transition"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setIpInput(deviceIp);
+                    setIsEditingIp(false);
+                  }}
+                  className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsEditingIp(true)}
+                  className="px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-mono text-[11px] transition"
+                >
+                  Change IP
+                </button>
+                <button
+                  onClick={() => {
+                    const ap = 'http://192.168.4.1';
+                    setDeviceIp(ap);
+                    saveDeviceIp(ap);
+                    setIpInput(ap);
+                  }}
+                  title="Connect via SoftAP (192.168.4.1)"
+                  className="px-2 py-1 rounded-lg border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-400 text-[10px] font-mono transition"
+                >
+                  SoftAP
+                </button>
+                <button
+                  onClick={() => {
+                    const sta = 'http://192.168.254.112';
+                    setDeviceIp(sta);
+                    saveDeviceIp(sta);
+                    setIpInput(sta);
+                  }}
+                  title="Connect via Station IP (192.168.254.112)"
+                  className="px-2 py-1 rounded-lg border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-400 text-[10px] font-mono transition"
+                >
+                  Home IP
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Minimal Hi-Fi Status Header (Status icons limited to clean toolbar) */}
         <MinimalStatusHeader

@@ -59,6 +59,19 @@ static void dlna_ssdp_task(void *pvParameters)
         char current_ip[32] = "192.168.4.1";
         if (wifi_manager_is_sta_connected()) {
             wifi_manager_get_sta_ip(current_ip, sizeof(current_ip));
+            static bool s_sta_joined = false;
+            if (!s_sta_joined && wifi_manager_get_sta_netif()) {
+                esp_netif_ip_info_t ip_info;
+                if (esp_netif_get_ip_info(wifi_manager_get_sta_netif(), &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+                    struct ip_mreq mreq_sta;
+                    mreq_sta.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
+                    mreq_sta.imr_interface.s_addr = ip_info.ip.addr;
+                    setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq_sta, sizeof(mreq_sta));
+                    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &ip_info.ip.addr, sizeof(ip_info.ip.addr));
+                    s_sta_joined = true;
+                    ESP_LOGI(TAG, "Joined SSDP multicast group on STA interface %s", current_ip);
+                }
+            }
         }
 
         if (len > 0) {

@@ -227,3 +227,8 @@ void wifi_manager_get_config(wifi_config_storage_t *config)
         memcpy(config, &s_config, sizeof(wifi_config_storage_t));
     }
 }
+
+esp_netif_t* wifi_manager_get_sta_netif(void)
+{
+    return s_netif_sta;
+}

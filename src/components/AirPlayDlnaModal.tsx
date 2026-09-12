@@ -62,8 +62,15 @@ export const AirPlayDlnaModal: React.FC<AirPlayDlnaModalProps> = ({
 
           <div className="text-xs text-zinc-400 space-y-1 font-mono">
             <div className="flex justify-between"><span>RTSP Control:</span> <span className="text-zinc-200">TCP :7000</span></div>
-            <div className="flex justify-between"><span>RTP Audio:</span> <span className="text-zinc-200">UDP :5000 (Lossless ALAC)</span></div>
+            <div className="flex justify-between"><span>RTP Audio:</span> <span className="text-zinc-200">UDP :5000 (Lossless ALAC / PCM16)</span></div>
+            <div className="flex justify-between"><span>mDNS Service:</span> <span className="text-zinc-200">_raop._tcp & _airplay._tcp</span></div>
             <div className="flex justify-between"><span>Connected Client:</span> <span className="text-cyan-300">{services.airplay2.activeStreaming ? services.airplay2.clientName : 'None (Listening)'}</span></div>
+          </div>
+
+          <div className="mt-2.5 p-2.5 bg-zinc-900/80 rounded-lg border border-zinc-800/80 text-[11px] text-zinc-300 space-y-1 font-sans">
+            <div className="font-semibold text-cyan-400">How to connect via AirPlay:</div>
+            <div>• Ensure your iPhone, iPad, or Mac is on the same Wi-Fi network (or connected to SoftAP).</div>
+            <div>• Open Control Center &gt; tap the AirPlay icon &gt; Select <strong className="text-white">ESP32-S3 Hi-Fi</strong>.</div>
           </div>
 
           <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-end">
@@ -100,8 +107,15 @@ export const AirPlayDlnaModal: React.FC<AirPlayDlnaModalProps> = ({
 
           <div className="text-xs text-zinc-400 space-y-1 font-mono">
             <div className="flex justify-between"><span>SSDP Discovery:</span> <span className="text-zinc-200">239.255.255.250:1900</span></div>
-            <div className="flex justify-between"><span>HTTP SOAP:</span> <span className="text-zinc-200">TCP :49152 (AVTransport)</span></div>
-            <div className="flex justify-between"><span>Compatible Apps:</span> <span className="text-purple-300">BubbleUPnP, mConnect, Foobar2000</span></div>
+            <div className="flex justify-between"><span>UPnP SOAP:</span> <span className="text-zinc-200">Port 80 (AVTransport, RenderingControl)</span></div>
+            <div className="flex justify-between"><span>Compatible Apps:</span> <span className="text-purple-300">BubbleUPnP, mConnect, VLC, Windows</span></div>
+          </div>
+
+          <div className="mt-2.5 p-2.5 bg-zinc-900/80 rounded-lg border border-zinc-800/80 text-[11px] text-zinc-300 space-y-1 font-sans">
+            <div className="font-semibold text-purple-400">How to connect via DLNA / UPnP:</div>
+            <div>• Open BubbleUPnP, mconnect, VLC, or Windows Media Player.</div>
+            <div>• Select Renderer &gt; Choose <strong className="text-white">ESP32-S3 Hi-Fi Audio</strong>.</div>
+            <div>• Play any audio file; the ESP32 decodes and plays via UDA1334A I2S DAC.</div>
           </div>
 
           <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-end">

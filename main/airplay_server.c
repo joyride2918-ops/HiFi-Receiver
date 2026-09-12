@@ -193,9 +193,16 @@ static void airplay_rtp_task(void *pvParameters)
             }
 
             if (len > (int)header_len) {
-                const uint8_t *pcm_data = packet + header_len;
+                uint8_t *pcm_data = packet + header_len;
                 size_t pcm_len = len - header_len;
-                audio_pipeline_write(pcm_data, pcm_len, pdMS_TO_TICKS(20));
+                
+                // Convert Apple Big-Endian PCM16 to ESP32 Little-Endian
+                int16_t *samples = (int16_t *)pcm_data;
+                int sample_count = pcm_len / sizeof(int16_t);
+                for (int s = 0; s < sample_count; s++) {
+                    samples[s] = (int16_t)__builtin_bswap16((uint16_t)samples[s]);
+                }
+                audio_pipeline_write((const uint8_t *)samples, pcm_len, pdMS_TO_TICKS(20));
             }
         }
     }
