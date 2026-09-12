@@ -81,6 +81,80 @@ Apache-2.0 License. Copyright (c) 2026.
 `
   },
   {
+    path: 'platformio.ini',
+    name: 'platformio.ini',
+    type: 'file',
+    language: 'ini',
+    content: `; ==============================================================================
+; PlatformIO Project Configuration for ESP32-S3-WROOM-1 N16R8 + UDA1334A DAC
+; Supports both ESP-IDF Native and Arduino-as-ESP-IDF-Component frameworks
+; ==============================================================================
+
+[platformio]
+default_envs = esp32s3_espidf
+src_dir = main
+
+[env:esp32s3_espidf]
+platform = espressif32 @ ~6.6.0
+framework = espidf
+board = esp32-s3-devkitc-1
+
+; 16MB Flash, QIO 80MHz & Custom Partitions
+board_build.flash_mode = qio
+board_build.f_flash = 80000000L
+board_build.flash_size = 16MB
+board_build.partitions = partitions.csv
+
+; 8MB Octal PSRAM (OPI) Configuration for Audio Ringbuffer
+board_build.arduino.memory_type = qio_opi
+board_build.psram_type = opi
+
+; Compilation Flags
+build_flags = 
+    -DCORE_DEBUG_LEVEL=3
+    -DCONFIG_SPIRAM_SUPPORT=1
+    -DCONFIG_SPIRAM_MODE_OCT=1
+    -DCONFIG_SPIRAM_TYPE_AUTO=1
+    -DCONFIG_SPIRAM_SPEED_80M=1
+    -DCONFIG_SPIRAM_USE_MALLOC=1
+    ; Audio Hardware Pinout (UDA1334A I2S DAC)
+    -DCONFIG_I2S_BCLK_PIN=14
+    -DCONFIG_I2S_WSEL_PIN=15
+    -DCONFIG_I2S_DIN_PIN=16
+    ; 1024KB Ringbuffer in Octal PSRAM
+    -DCONFIG_AUDIO_RINGBUF_SIZE=1048576
+
+; Serial Upload & Monitor settings
+upload_speed = 921600
+monitor_speed = 115200
+monitor_filters = esp32_exception_decoder, direct
+
+; Automatic merged.bin generation post-build
+extra_scripts = post:scripts/pio_merge_bin.py
+
+; ------------------------------------------------------------------------------
+; Optional Arduino-as-Component environment (if migrating to Arduino Core)
+; ------------------------------------------------------------------------------
+[env:esp32s3_arduino]
+platform = espressif32 @ ~6.6.0
+framework = arduino
+board = esp32-s3-devkitc-1
+board_build.flash_mode = qio
+board_build.f_flash = 80000000L
+board_build.flash_size = 16MB
+board_build.partitions = partitions.csv
+board_build.arduino.memory_type = qio_opi
+build_flags = 
+    -DBOARD_HAS_PSRAM
+    -mfix-esp32-psram-cache-issue
+    -DCONFIG_I2S_BCLK_PIN=14
+    -DCONFIG_I2S_WSEL_PIN=15
+    -DCONFIG_I2S_DIN_PIN=16
+upload_speed = 921600
+monitor_speed = 115200
+`
+  },
+  {
     path: 'CMakeLists.txt',
     name: 'CMakeLists.txt',
     type: 'file',
@@ -1400,5 +1474,237 @@ void web_server_stop(void)
     }
 }
 `
+  },
+  {
+    path: 'flash.sh',
+    name: 'flash.sh',
+    type: 'file',
+    language: 'bash',
+    content: `#!/usr/bin/env bash
+# ==============================================================================
+# ESP32-S3 Auto-Flash Script (Linux & macOS)
+# Flashes monolithic merged.bin at 0x0 or individual build partitions
+# ==============================================================================
+set -e
+
+PORT=\${1:-""}
+
+if [ -z "$PORT" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        PORT=$(ls /dev/cu.wchusbserial* /dev/cu.usbserial* /dev/cu.SLAB_USBtoUART /dev/cu.usbmodem* 2>/dev/null | head -n 1 || true)
+    else
+        PORT=$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -n 1 || true)
+    fi
+fi
+
+if [ -z "$PORT" ]; then
+    echo "❌ Error: No ESP32-S3 serial port automatically detected."
+    echo "Usage: ./flash.sh [/dev/ttyUSB0 or /dev/ttyACM0 or COM port]"
+    exit 1
+fi
+
+echo "🚀 Connecting to ESP32-S3 on port: $PORT"
+
+if [ -f "build/merged.bin" ]; then
+    echo "📦 Flashing pre-compiled monolithic merged.bin at offset 0x00000000 (baud 921600)..."
+    esptool.py --chip esp32s3 -p "$PORT" -b 921600 --before default_reset --after hard_reset write_flash -z \\
+        --flash_mode dio --flash_freq 80m --flash_size 16MB \\
+        0x0 build/merged.bin
+elif [ -f "build/esp32s3_audio.bin" ]; then
+    echo "📦 Flashing individual partition table and firmware binaries..."
+    esptool.py --chip esp32s3 -p "$PORT" -b 921600 --before default_reset --after hard_reset write_flash -z \\
+        --flash_mode dio --flash_freq 80m --flash_size 16MB \\
+        0x0 build/bootloader/bootloader.bin \\
+        0x8000 build/partition_table/partition-table.bin \\
+        0xf000 build/ota_data_initial.bin \\
+        0x20000 build/esp32s3_audio.bin
+else
+    echo "❌ Error: Binaries not found in build/ directory. Run 'idf.py build' or download merged.bin first."
+    exit 1
+fi
+
+echo "✅ Flashing successful! Opening live serial monitor at 115200 baud..."
+python3 -m serial.tools.miniterm "$PORT" 115200 || idf.py -p "$PORT" monitor
+`
+  },
+  {
+    path: 'flash.bat',
+    name: 'flash.bat',
+    type: 'file',
+    language: 'bat',
+    content: `@echo off
+REM ==============================================================================
+REM ESP32-S3 Flash Script for Windows
+REM Usage: flash.bat COM3
+REM ==============================================================================
+
+set PORT=%1
+if "%PORT%"=="" (
+    echo [ERROR] Please provide your COM port.
+    echo Example: flash.bat COM3
+    exit /b 1
+)
+
+echo [INFO] Flashing ESP32-S3 N16R8 on %PORT% at 921600 baud...
+
+if exist "build\\merged.bin" (
+    echo [INFO] Writing monolithic merged.bin at offset 0x0...
+    esptool.py --chip esp32s3 -p %PORT% -b 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build\\merged.bin
+) else (
+    echo [INFO] Writing individual partitions: bootloader, partitions, otadata, app...
+    esptool.py --chip esp32s3 -p %PORT% -b 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build\\bootloader\\bootloader.bin 0x8000 build\\partition_table\\partition-table.bin 0xf000 build\\ota_data_initial.bin 0x20000 build\\esp32s3_audio.bin
+)
+
+echo [SUCCESS] Flash completed! Starting serial monitor at 115200 baud...
+idf.py -p %PORT% monitor
+`
+  },
+  {
+    path: 'scripts/merge_bin.py',
+    name: 'merge_bin.py',
+    type: 'file',
+    language: 'python',
+    content: `#!/usr/bin/env python3
+"""
+ESP32-S3 Merged Binary Generator
+Combines all build artifacts into a single monolithic 0x0 binary for production flashing.
+"""
+import sys
+import os
+import subprocess
+
+def main():
+    print("=== ESP32-S3 N16R8 Merged Binary Generator ===")
+    
+    bootloader = "build/bootloader/bootloader.bin"
+    partitions = "build/partition_table/partition-table.bin"
+    otadata = "build/ota_data_initial.bin"
+    app = "build/esp32s3_audio.bin"
+    output = "build/merged.bin"
+
+    cmd = [
+        "esptool.py", "--chip", "esp32s3", "merge_bin",
+        "-o", output,
+        "--flash_mode", "dio",
+        "--flash_freq", "80m",
+        "--flash_size", "16MB",
+        "0x0", bootloader,
+        "0x8000", partitions,
+        "0xf000", otadata,
+        "0x20000", app
+    ]
+
+    print("Running:", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+        print(f"\\n✅ Successfully generated monolithic '{output}'!")
+        print(f"Flash with: esptool.py --chip esp32s3 write_flash 0x0 {output}")
+    except Exception as e:
+        print(f"❌ Error merging binaries: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+`
+  },
+  {
+    path: 'scripts/pio_merge_bin.py',
+    name: 'pio_merge_bin.py',
+    type: 'file',
+    language: 'python',
+    content: `Import("env")
+# ==============================================================================
+# PlatformIO Post-Build Hook: Generates monolithic merged.bin (0x0 Flash Image)
+# ==============================================================================
+import os
+
+def post_build_action(source, target, env):
+    build_dir = env.subst("$BUILD_DIR")
+    bootloader = os.path.join(build_dir, "bootloader.bin")
+    partitions = os.path.join(build_dir, "partitions.bin")
+    app = os.path.join(build_dir, "firmware.bin")
+    merged = os.path.join(build_dir, "merged.bin")
+
+    print("\\n[PlatformIO Hook] Merging binaries into monolithic merged.bin...")
+    cmd = (
+        f"esptool.py --chip esp32s3 merge_bin -o {merged} "
+        f"--flash_mode dio --flash_freq 80m --flash_size 16MB "
+        f"0x0 {bootloader} 0x8000 {partitions} 0x20000 {app}"
+    )
+    res = os.system(cmd)
+    if res == 0:
+        print(f"[PlatformIO Hook] ✅ Created {merged} ready for 0x0 flashing!\\n")
+
+env.AddPostAction("$BUILD_DIR/\${PROGNAME}.bin", post_build_action)
+`
+  },
+  {
+    path: 'build/flasher_args.json',
+    name: 'flasher_args.json',
+    type: 'file',
+    language: 'json',
+    content: `{
+  "write_flash_args": [
+    "--flash_mode", "dio",
+    "--flash_size", "16MB",
+    "--flash_freq", "80m"
+  ],
+  "flash_settings": {
+    "flash_mode": "dio",
+    "flash_size": "16MB",
+    "flash_freq": "80m"
+  },
+  "flash_files": {
+    "0x0": "bootloader/bootloader.bin",
+    "0x8000": "partition_table/partition-table.bin",
+    "0xf000": "ota_data_initial.bin",
+    "0x20000": "esp32s3_audio.bin"
+  },
+  "merged_bin": {
+    "offset": "0x00000000",
+    "file": "merged.bin",
+    "flash_size": "16MB"
+  },
+  "bootloader": {
+    "offset": "0x00000000",
+    "file": "bootloader/bootloader.bin",
+    "encrypted": "false"
+  },
+  "app": {
+    "offset": "0x00020000",
+    "file": "esp32s3_audio.bin",
+    "encrypted": "false"
+  },
+  "partition_table": {
+    "offset": "0x00008000",
+    "file": "partition_table/partition-table.bin",
+    "encrypted": "false"
+  },
+  "otadata": {
+    "offset": "0x0000f000",
+    "file": "ota_data_initial.bin",
+    "encrypted": "false"
+  },
+  "extra_esptool_args": {
+    "after": "hard_reset",
+    "before": "default_reset",
+    "stub": true,
+    "chip": "esp32s3"
+  }
+}
+`
+  },
+  {
+    path: 'build/flash_project_args',
+    name: 'flash_project_args',
+    type: 'file',
+    language: 'bash',
+    content: `--flash_mode dio --flash_freq 80m --flash_size 16MB
+0x0 bootloader/bootloader.bin
+0x8000 partition_table/partition-table.bin
+0xf000 ota_data_initial.bin
+0x20000 esp32s3_audio.bin
+`
   }
 ];
+

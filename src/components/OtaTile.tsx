@@ -7,9 +7,15 @@ import {
   RefreshCw, 
   Layers, 
   FileCode,
-  HardDrive
+  HardDrive,
+  Download
 } from 'lucide-react';
 import { OTAState } from '../types';
+import { 
+  generateAppBin, 
+  generateMergedBin, 
+  downloadBinaryFile 
+} from '../services/binaryGenerator';
 
 interface OtaTileProps {
   otaState: OTAState;
@@ -215,16 +221,37 @@ export const OtaTile: React.FC<OtaTileProps> = ({
         </div>
       </div>
 
-      {/* Test Flash Sample Action Button */}
-      <div className="mt-3 pt-2 border-t border-zinc-800/80 flex items-center justify-between">
-        <span className="text-[10px] text-zinc-500">Current version: {otaState.firmwareVersion}</span>
+      {/* Firmware Binaries Download & Flash Buttons */}
+      <div className="mt-3 pt-2.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            id="btn-download-app-bin-ota"
+            onClick={() => downloadBinaryFile('esp32s3_audio_app_0x20000.bin', generateAppBin())}
+            className="text-[10px] font-mono px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg transition flex items-center gap-1"
+            title="Download standalone app binary for OTA partition update"
+          >
+            <Download className="w-3 h-3 text-cyan-400" />
+            <span>app.bin (OTA)</span>
+          </button>
+          <button
+            id="btn-download-merged-bin-ota"
+            onClick={() => downloadBinaryFile('esp32s3_merged_firmware_0x0.bin', generateMergedBin())}
+            className="text-[10px] font-mono px-2 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-700 rounded-lg transition flex items-center gap-1 font-semibold"
+            title="Download monolithic 0x0 factory image"
+          >
+            <Download className="w-3 h-3 text-cyan-300" />
+            <span>merged.bin</span>
+          </button>
+        </div>
+
         <button
           id="btn-simulate-ota-update"
           disabled={otaState.isUpdating}
-          onClick={() => startOtaFlash('esp32s3-audio-v2.5.1.bin', 3145728)}
-          className="text-[10px] font-mono px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-cyan-300 border border-zinc-700 rounded-lg transition disabled:opacity-50"
+          onClick={() => startOtaFlash('esp32s3_audio.bin (Production Build)', 2936012)}
+          className="text-[10px] font-mono px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-cyan-300 border border-zinc-700 rounded-lg transition disabled:opacity-50 flex items-center gap-1"
         >
-          Flash Test Firmware .bin
+          <RefreshCw className={`w-3 h-3 ${otaState.isUpdating ? 'animate-spin' : ''}`} />
+          <span>Flash esp32s3_audio.bin</span>
         </button>
       </div>
     </div>

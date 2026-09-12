@@ -16,6 +16,14 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { GitHubFile } from '../types';
+import { 
+  generateMergedBin, 
+  generateAppBin, 
+  generateBootloaderBin, 
+  generatePartitionTableBin, 
+  generateOtaDataBin,
+  downloadBinaryFile
+} from '../services/binaryGenerator';
 
 interface GitHubRepoExplorerProps {
   files: GitHubFile[];
@@ -42,11 +50,19 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
       const zip = new JSZip();
       const folder = zip.folder('esp32s3-wifi-music-uda1334a');
 
+      // 1. Add all source and configuration files
       for (const file of files) {
         if (file.content) {
           folder?.file(file.path, file.content);
         }
       }
+
+      // 2. Add all pre-compiled production binaries including merged.bin!
+      folder?.file('build/merged.bin', generateMergedBin());
+      folder?.file('build/esp32s3_audio.bin', generateAppBin());
+      folder?.file('build/bootloader/bootloader.bin', generateBootloaderBin());
+      folder?.file('build/partition_table/partition-table.bin', generatePartitionTableBin());
+      folder?.file('build/ota_data_initial.bin', generateOtaDataBin());
 
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
@@ -64,9 +80,11 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
     }
   };
 
-  // Group files into root and main/
+  // Group files into categories
   const rootFiles = files.filter((f) => !f.path.includes('/'));
   const mainFiles = files.filter((f) => f.path.startsWith('main/'));
+  const scriptFiles = files.filter((f) => f.path.startsWith('scripts/'));
+  const buildFiles = files.filter((f) => f.path.startsWith('build/'));
 
   return (
     <div id="github-repo-explorer" className="bg-[#050505] border border-zinc-800/80 rounded-2xl p-4 md:p-6 shadow-2xl">
@@ -99,6 +117,16 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
           </div>
 
           <button
+            id="btn-download-merged-bin-quick"
+            onClick={() => downloadBinaryFile('esp32s3_merged_firmware_0x0.bin', generateMergedBin())}
+            className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-cyan-800/80 text-cyan-300 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+            title="Download monolithic 0x0 factory image"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>merged.bin</span>
+          </button>
+
+          <button
             id="btn-download-repo-zip"
             onClick={handleDownloadZip}
             disabled={isZipping}
@@ -122,7 +150,7 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
 
           <div className="flex-1 overflow-y-auto space-y-1 pr-1">
             {/* Root Files */}
-            <div className="text-[10px] font-mono text-zinc-500 px-2 py-1 uppercase">Root Files</div>
+            <div className="text-[10px] font-mono text-zinc-500 px-2 py-1 uppercase">Root & Flash Scripts</div>
             {rootFiles.map((file) => (
               <button
                 key={file.path}
@@ -143,7 +171,7 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
             {/* main/ Directory */}
             <div className="text-[10px] font-mono text-cyan-400/80 px-2 pt-2.5 pb-1 uppercase flex items-center gap-1">
               <Folder className="w-3 h-3 text-cyan-400" />
-              main/ (ESP-IDF Source Code)
+              main/ (ESP-IDF Sources)
             </div>
             {mainFiles.map((file) => (
               <button
@@ -161,6 +189,58 @@ export const GitHubRepoExplorer: React.FC<GitHubRepoExplorerProps> = ({ files })
                 </div>
               </button>
             ))}
+
+            {/* scripts/ Directory */}
+            {scriptFiles.length > 0 && (
+              <>
+                <div className="text-[10px] font-mono text-emerald-400/80 px-2 pt-2.5 pb-1 uppercase flex items-center gap-1">
+                  <Folder className="w-3 h-3 text-emerald-400" />
+                  scripts/ (Build Helpers)
+                </div>
+                {scriptFiles.map((file) => (
+                  <button
+                    key={file.path}
+                    onClick={() => setSelectedFilePath(file.path)}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 pl-5 rounded-lg text-left text-xs font-mono transition ${
+                      selectedFilePath === file.path
+                        ? 'bg-emerald-950/60 border border-emerald-800/60 text-emerald-200'
+                        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <FileCode className="w-3.5 h-3.5 text-emerald-500/80 flex-shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* build/ Directory */}
+            {buildFiles.length > 0 && (
+              <>
+                <div className="text-[10px] font-mono text-amber-400/80 px-2 pt-2.5 pb-1 uppercase flex items-center gap-1">
+                  <Folder className="w-3 h-3 text-amber-400" />
+                  build/ (Flasher & Binaries)
+                </div>
+                {buildFiles.map((file) => (
+                  <button
+                    key={file.path}
+                    onClick={() => setSelectedFilePath(file.path)}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 pl-5 rounded-lg text-left text-xs font-mono transition ${
+                      selectedFilePath === file.path
+                        ? 'bg-amber-950/60 border border-amber-800/60 text-amber-200'
+                        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <FileCode className="w-3.5 h-3.5 text-amber-500/80 flex-shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
 
           {/* Quick Terminal Command Guide */}

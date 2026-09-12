@@ -12,7 +12,8 @@ import {
   Activity,
   Terminal,
   ExternalLink,
-  Volume2
+  Volume2,
+  Cpu
 } from 'lucide-react';
 
 import { 
@@ -52,10 +53,11 @@ import { OtaTile } from './components/OtaTile';
 import { HardwareSpecsTile } from './components/HardwareSpecsTile';
 import { AirPlayDlnaTile } from './components/AirPlayDlnaTile';
 import { GitHubRepoExplorer } from './components/GitHubRepoExplorer';
+import { FirmwareBuildsCard } from './components/FirmwareBuildsCard';
 
 export default function App() {
   // Navigation / View Tabs
-  const [activeView, setActiveView] = useState<'controller' | 'github'>('controller');
+  const [activeView, setActiveView] = useState<'controller' | 'builds' | 'github'>('controller');
 
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -379,12 +381,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* Primary View Switcher: AMOLED Controller vs GitHub Repo */}
+          {/* Primary View Switcher: AMOLED Controller vs Firmware Builds vs GitHub Repo */}
           <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800/80">
             <button
               id="tab-view-controller"
               onClick={() => setActiveView('controller')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                 activeView === 'controller'
                   ? 'bg-zinc-800 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -394,17 +396,34 @@ export default function App() {
               <span className="hidden sm:inline">AMOLED Controller</span>
               <span className="sm:hidden">Control</span>
             </button>
+
+            <button
+              id="tab-view-builds"
+              onClick={() => setActiveView('builds')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                activeView === 'builds'
+                  ? 'bg-cyan-500 text-black shadow-sm font-bold'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Firmware Builds</span>
+              <span className="hidden md:inline text-[9px] px-1.5 py-0.2 rounded bg-black/30 font-mono">
+                merged.bin
+              </span>
+            </button>
+
             <button
               id="tab-view-github"
               onClick={() => setActiveView('github')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                 activeView === 'github'
-                  ? 'bg-cyan-500 text-black shadow-sm'
+                  ? 'bg-zinc-800 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <Github className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">GitHub Project Repo</span>
+              <span className="hidden sm:inline">GitHub Repo</span>
               <span className="sm:hidden">Repo</span>
             </button>
           </div>
@@ -497,9 +516,17 @@ export default function App() {
           </div>
         )}
 
-        {/* View 2: Complete GitHub Repository & ESP-IDF Source Code Explorer */}
+        {/* View 2: Pre-Built Firmware Binaries (merged.bin, bootloader, app.bin) */}
+        {activeView === 'builds' && (
+          <div className="space-y-4">
+            <FirmwareBuildsCard />
+          </div>
+        )}
+
+        {/* View 3: Complete GitHub Repository & ESP-IDF Source Code Explorer */}
         {activeView === 'github' && (
           <div className="space-y-4">
+            <FirmwareBuildsCard />
             <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 text-xs text-zinc-300 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-cyan-400" />
